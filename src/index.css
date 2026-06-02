@@ -1,0 +1,101 @@
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    font-family: 'Vazirmatn', sans-serif;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0a0a0a;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #d4a843;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #c9982e;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-black/40 backdrop-blur-xl border border-gold-500/20 rounded-2xl;
+  }
+
+  .gold-gradient {
+    @apply bg-gradient-to-r from-gold-400 via-gold-500 to-gold-600;
+  }
+
+  .gold-text-gradient {
+    @apply bg-gradient-to-r from-gold-300 via-gold-400 to-gold-500 bg-clip-text text-transparent;
+  }
+
+  .btn-gold {
+    @apply px-6 py-3 bg-gradient-to-r from-gold-500 to-gold-600 text-black font-semibold rounded-xl
+    hover:from-gold-400 hover:to-gold-500 transition-all duration-300 shadow-lg shadow-gold-500/20
+    active:scale-95;
+  }
+
+  .btn-outline-gold {
+    @apply px-6 py-3 border border-gold-500/40 text-gold-400 rounded-xl
+    hover:bg-gold-500/10 hover:border-gold-400/60 transition-all duration-300
+    active:scale-95;
+  }
+
+  .input-dark {
+    @apply w-full bg-white/5 border border-gold-500/20 rounded-xl px-4 py-3 text-white
+    placeholder:text-gray-500 focus:outline-none focus:border-gold-500/50 focus:ring-1 focus:ring-gold-500/30
+    transition-all duration-300;
+  }
+
+  .stat-card {
+    @apply glass-card p-6 transition-all duration-300 hover:border-gold-500/40 hover:shadow-lg hover:shadow-gold-500/5;
+  }
+
+  .nav-item {
+    @apply flex items-center gap-3 px-4 py-3 rounded-xl text-gray-400 transition-all duration-200
+    hover:text-gold-400 hover:bg-gold-500/5 cursor-pointer;
+  }
+
+  .nav-item-active {
+    @apply flex items-center gap-3 px-4 py-3 rounded-xl text-gold-400 bg-gold-500/10 border border-gold-500/20;
+  }
+
+  .table-row {
+    @apply border-b border-gold-500/10 hover:bg-gold-500/5 transition-colors duration-200;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes pulse-gold {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(212, 168, 67, 0.4); }
+  50% { box-shadow: 0 0 0 10px rgba(212, 168, 67, 0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out forwards;
+}
+
+.animate-slide-in {
+  animation: slideInRight 0.4s ease-out forwards;
+}
+
+.animate-pulse-gold {
+  animation: pulse-gold 2s infinite;
+}
