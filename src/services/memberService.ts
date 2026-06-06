@@ -11,6 +11,7 @@ export interface MemberFormPayload {
   used_sessions: number;
   start_date: string;
   end_date: string;
+  birthday: string;
   notes: string;
 }
 
@@ -36,6 +37,7 @@ function apiToRecord(row: ApiMember): MemberRecord {
     membership_type: 'monthly',
     total_sessions: 12,
     used_sessions: 0,
+    birthday: row.birthday ? String(row.birthday) : '',
     notes: '',
     is_active: active,
   };
@@ -47,6 +49,7 @@ function payloadToApi(payload: MemberFormPayload) {
     phone: payload.phone.trim(),
     expiry_date: payload.end_date,
     weekly_sessions: payload.weekly_sessions,
+    birthday: payload.birthday?.trim() || null,
   };
 }
 

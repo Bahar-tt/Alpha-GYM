@@ -1,25 +1,16 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider, useAuth } from './context/AuthContext';
+import { AuthProvider } from './context/AuthContext';
+import { useAuth } from './context/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Members from './pages/Members';
 import Renewals from './pages/Renewals';
 import Messaging from './pages/Messaging';
+import SmsLogs from './pages/SmsLogs';
+import Broadcast from './pages/Broadcast';
 import CoachPortal from './pages/CoachPortal';
-
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#050505] flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-gold-500/30 border-t-gold-500 rounded-full animate-spin" />
-      </div>
-    );
-  }
-  if (!user) return <Navigate to="/login" replace />;
-  return <>{children}</>;
-}
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -54,7 +45,32 @@ function App() {
             <Route path="members" element={<Members />} />
             <Route path="renewals" element={<Renewals />} />
             <Route path="messaging" element={<Messaging />} />
-            <Route path="coach" element={<CoachPortal />} />
+
+            {/* Admin-only routes */}
+            <Route
+              path="sms-logs"
+              element={
+                <ProtectedRoute requireAdmin>
+                  <SmsLogs />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="broadcast"
+              element={
+                <ProtectedRoute requireAdmin>
+                  <Broadcast />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="coach"
+              element={
+                <ProtectedRoute requireAdmin>
+                  <CoachPortal />
+                </ProtectedRoute>
+              }
+            />
           </Route>
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>

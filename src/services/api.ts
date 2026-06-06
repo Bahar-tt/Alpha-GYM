@@ -6,6 +6,7 @@ export interface ApiMember {
   phone: string;
   expiry_date: string;
   weekly_sessions: number;
+  birthday?: string | null;
 }
 
 async function readBody(res: Response): Promise<unknown> {

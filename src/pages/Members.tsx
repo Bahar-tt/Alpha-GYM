@@ -31,6 +31,7 @@ interface MemberForm {
   used_sessions: number;
   start_date_jalali: JalaliDate;
   end_date_jalali: JalaliDate;
+  birthday: string;
   notes: string;
 }
 
@@ -55,6 +56,7 @@ const emptyForm: MemberForm = {
   used_sessions: 0,
   start_date_jalali: defaultStart,
   end_date_jalali: defaultEnd,
+  birthday: '',
   notes: '',
 };
 
@@ -83,6 +85,7 @@ function toMemberPayload(form: MemberForm): MemberFormPayload {
     used_sessions: form.used_sessions,
     start_date: jalaliToGregorianIso(form.start_date_jalali),
     end_date: jalaliToGregorianIso(form.end_date_jalali),
+    birthday: form.birthday,
     notes: form.notes.trim(),
   };
 }
@@ -200,6 +203,7 @@ export default function Members() {
       used_sessions: member.used_sessions ?? 0,
       start_date_jalali: gregorianToJalali(member.start_date),
       end_date_jalali: gregorianToJalali(member.end_date),
+      birthday: member.birthday ?? '',
       notes: member.notes ?? '',
     });
     setFormError('');
@@ -278,7 +282,7 @@ export default function Members() {
                 <th className="pb-3">تلفن</th>
                 <th className="pb-3">نوع عضویت</th>
                 <th className="pb-3">جلسات</th>
-                <th className="pb-3">پایان عضویت (شمسی)</th>
+                <th className="pb-3">پایان عضویت </th>
                 <th className="pb-3">عملیات</th>
               </tr>
             </thead>
@@ -348,7 +352,12 @@ export default function Members() {
               onChange={(e) => setForm({ ...form, phone: e.target.value })}
               required
             />
-
+            <input
+               className="input-dark"
+               placeholder="تاریخ تولد (اختیاری - YYYY-MM-DD)"
+               value={form.birthday}
+               onChange={(e) => setForm({ ...form, birthday: e.target.value })}
+/>
             <select
               className="input-dark"
               value={form.membership_type}
@@ -407,13 +416,13 @@ export default function Members() {
             </div>
 
             <JalaliDatePicker
-              label="تاریخ شروع (شمسی)"
+              label="تاریخ شروع"
               value={form.start_date_jalali}
               onChange={(start_date_jalali) => setForm({ ...form, start_date_jalali })}
             />
 
             <JalaliDatePicker
-              label="تاریخ پایان (شمسی)"
+              label="تاریخ پایان"
               value={form.end_date_jalali}
               min={form.start_date_jalali}
               onChange={(end_date_jalali) => setForm({ ...form, end_date_jalali })}

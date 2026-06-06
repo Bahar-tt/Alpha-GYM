@@ -7,6 +7,8 @@ import {
   Users,
   RefreshCcw,
   MessageSquare,
+  Send,
+  ScrollText,
   Dumbbell,
   LogOut,
   Menu,
@@ -18,6 +20,8 @@ const navItems = [
   { to: '/members', label: 'اعضا', icon: Users },
   { to: '/renewals', label: 'تمدیدها', icon: RefreshCcw },
   { to: '/messaging', label: 'پیام‌رسانی هوشمند', icon: MessageSquare },
+  { to: '/sms-logs', label: 'پیام‌ها', icon: ScrollText },
+  { to: '/broadcast', label: 'ارسال پیام', icon: Send },
   { to: '/coach', label: 'پورتال مربی', icon: Dumbbell },
 ];
 

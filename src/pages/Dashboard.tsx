@@ -31,6 +31,10 @@ interface StoredRenewal {
   created_at: string;
 }
 
+function todayIso(): string {
+  return new Date().toISOString().split('T')[0];
+}
+
 function weekEndIso(): string {
   return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 }
@@ -62,12 +66,25 @@ export default function Dashboard() {
     }
 
     const list = members || [];
+    const today = todayIso();
     const weekEnd = weekEndIso();
 
     const active = list.filter((m) => isMemberActive(m.end_date));
     const inactive = list.filter((m) => !isMemberActive(m.end_date));
-    const expiring = active.filter((m) => m.end_date <= weekEnd);
-    const recent = [...list].slice(0, 5);
+
+    // Only include members whose end_date is between today and 7 days from now
+    const expiring = active.filter(
+      (m) => m.end_date >= today && m.end_date <= weekEnd
+    );
+
+    // Sort by created_at descending to show the newest members first
+    const recent = [...list]
+      .sort((a, b) => {
+        const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return dateB - dateA;
+      })
+      .slice(0, 5);
 
     let totalRenewals = 0;
     let monthlyRevenue = 0;

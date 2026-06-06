@@ -10,6 +10,7 @@
     "better-sqlite3": "^11.7.0",
     "cors": "^2.8.5",
     "express": "^4.21.2",
+    "jalali-moment": "^3.3.11",
     "node-cron": "^3.0.3"
   }
 }
