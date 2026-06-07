@@ -13,21 +13,25 @@ import {
   LogOut,
   Menu,
   X,
+  UserCog,
 } from 'lucide-react';
 
 const navItems = [
-  { to: '/dashboard', label: 'داشبورد', icon: LayoutDashboard },
-  { to: '/members', label: 'اعضا', icon: Users },
-  { to: '/renewals', label: 'تمدیدها', icon: RefreshCcw },
-  { to: '/messaging', label: 'پیام‌رسانی هوشمند', icon: MessageSquare },
-  { to: '/sms-logs', label: 'پیام‌ها', icon: ScrollText },
-  { to: '/broadcast', label: 'ارسال پیام', icon: Send },
-  { to: '/coach', label: 'پورتال مربی', icon: Dumbbell },
+  { to: '/dashboard', label: 'داشبورد',          icon: LayoutDashboard, adminOnly: false },
+  { to: '/members',   label: 'اعضا',              icon: Users,           adminOnly: false },
+  { to: '/renewals',  label: 'تمدیدها',           icon: RefreshCcw,      adminOnly: false },
+  { to: '/messaging', label: 'پیام‌رسانی هوشمند', icon: MessageSquare,   adminOnly: false },
+  { to: '/sms-logs',  label: 'پیام‌ها',           icon: ScrollText,      adminOnly: true  },
+  { to: '/broadcast', label: 'ارسال پیام',        icon: Send,            adminOnly: true  },
+  { to: '/coach',     label: 'پورتال مربی',       icon: Dumbbell,        adminOnly: true  },
+  { to: '/users',     label: 'مدیریت کاربران',    icon: UserCog,         adminOnly: true  },
 ];
 
 export default function Layout() {
-  const { profile, signOut } = useAuth();
+  const { profile, isAdmin, signOut } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const visibleItems = navItems.filter((item) => !item.adminOnly || isAdmin);
 
   return (
     <div className="min-h-screen bg-[#050505] flex" dir="rtl">
@@ -63,14 +67,12 @@ export default function Layout() {
 
         {/* Navigation */}
         <nav className="flex-1 p-4 space-y-1">
-          {navItems.map((item) => (
+          {visibleItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               onClick={() => setSidebarOpen(false)}
-              className={({ isActive }) =>
-                isActive ? 'nav-item-active' : 'nav-item'
-              }
+              className={({ isActive }) => isActive ? 'nav-item-active' : 'nav-item'}
             >
               <item.icon size={20} />
               <span className="text-sm font-medium">{item.label}</span>

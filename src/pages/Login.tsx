@@ -1,53 +1,28 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Mail, Lock, User } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
 
 export default function Login() {
-  const { signIn, signUp } = useAuth();
-  const navigate = useNavigate();
+  const { signIn } = useAuth();
+  const navigate   = useNavigate();
 
-  const [isRegister, setIsRegister] = useState(false);
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState('');
+  const [username,     setUsername]     = useState('');
+  const [password,     setPassword]     = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [error,        setError]        = useState('');
+  const [loading,      setLoading]      = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
-    if (isRegister) {
-      const { error: err } = await signUp(username, password, fullName);
-      if (err) {
-        setError(err);
-      } else {
-        // FIX: navigate to dashboard after successful registration
-        navigate('/dashboard');
-      }
-    } else {
-      const { error: err } = await signIn(username, password);
-      if (err) {
-        setError(err);
-      } else {
-        navigate('/dashboard');
-      }
-    }
+    const { error: err } = await signIn(username, password);
+    if (err) setError(err);
+    else navigate('/dashboard');
 
     setLoading(false);
-  };
-
-  // FIX: clear all fields and error when switching between login / register
-  const toggleMode = () => {
-    setIsRegister((prev) => !prev);
-    setError('');
-    setUsername('');
-    setPassword('');
-    setFullName('');
-    setShowPassword(false);
   };
 
   return (
@@ -58,8 +33,7 @@ export default function Login() {
         <img
           src="/IMG_20260525_112000_518.png"
           alt="آلفا جیم"
-          // FIX: scale-60 is not a valid Tailwind class → use scale-[0.6]
-          className="w-full h-full object-cover scale-[0.6] opacity-80"
+          className="w-full h-full object-cover scale-[0.95] opacity-100"
         />
       </div>
 
@@ -75,30 +49,18 @@ export default function Login() {
       {/* CONTENT */}
       <div className="relative z-10 w-full max-w-md">
 
-        {/* HEADER */}
         <div className="text-center mb-8">
-          <h1 className="text-5xl font-black gold-text-gradient">
-            آلفا جیم
-          </h1>
-
-          <p className="text-gray-300 mt-3 text-lg">
-            سیستم مدیریت باشگاه هوشمند
-          </p>
-
+          <h1 className="text-5xl font-black gold-text-gradient">آلفا جیم</h1>
+          <p className="text-gray-300 mt-3 text-lg">سیستم مدیریت باشگاه هوشمند</p>
           <div className="w-24 h-1 gold-gradient rounded-full mx-auto my-6" />
-
           <p className="text-gray-400 leading-7 text-sm">
             مدیریت هوشمند، تمرکز بیشتر بر اعضا <br />
             تبدیل تلاش‌ها به دستاورد و افتخار
           </p>
         </div>
 
-        {/* GLASS FORM */}
         <div className="glass-card p-8 backdrop-blur-xl bg-white/5 border border-white/10">
-
-          <h2 className="text-xl font-bold text-white text-center mb-6">
-            {isRegister ? 'ایجاد حساب' : 'ورود به سیستم'}
-          </h2>
+          <h2 className="text-xl font-bold text-white text-center mb-6">ورود به سیستم</h2>
 
           {error && (
             <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
@@ -107,21 +69,6 @@ export default function Login() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
-
-            {isRegister && (
-              <div className="relative">
-                <User size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="نام و نام خانوادگی"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  className="input-dark pr-11"
-                  required
-                />
-              </div>
-            )}
-
             <div className="relative">
               <Mail size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
@@ -144,7 +91,6 @@ export default function Login() {
                 className="input-dark pr-11 pl-11"
                 required
               />
-
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
@@ -154,25 +100,14 @@ export default function Login() {
               </button>
             </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="btn-gold w-full"
-            >
-              {loading
-                ? isRegister ? 'در حال ثبت‌نام...' : 'در حال ورود...'
-                : isRegister ? 'ایجاد حساب' : 'ورود'}
+            <button type="submit" disabled={loading} className="btn-gold w-full">
+              {loading ? 'در حال ورود...' : 'ورود'}
             </button>
-
           </form>
 
-          <button
-            onClick={toggleMode}
-            className="mt-6 w-full text-sm text-gray-400 hover:text-gold-400 transition-colors"
-          >
-            {isRegister ? 'حساب دارید؟ وارد شوید' : 'حساب ندارید؟ ثبت‌نام کنید'}
-          </button>
-
+          <p className="mt-6 text-center text-xs text-gray-400">
+            برای دریافت دسترسی با مدیر سیستم تماس بگیرید
+          </p>
         </div>
       </div>
     </div>
