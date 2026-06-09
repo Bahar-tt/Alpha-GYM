@@ -54,13 +54,13 @@ export default function Layout() {
         <div className="p-6 border-b border-gold-500/10">
           <div className="flex items-center gap-3">
             <img
-              src="/IMG_20260525_112000_518.png"
-              alt="آلفا جیم"
-              className="w-11 h-11 object-contain animate-pulse-gold"
+              src="/v5.png"
+              alt="Alpha GYM"
+              className="w-30 h-20 object-contain animate-pulse-gold"
             />
             <div>
-              <h1 className="text-xl font-bold gold-text-gradient">آلفا جیم</h1>
-              <p className="text-xs text-gray-500">سیستم مدیریت باشگاه</p>
+              <h1 className="text-xl font-bold gold-text-gradient">Alpha GYM </h1>
+              <p className="text-xs text-gray-500"> مدیریت هوشمند باشگاه   </p>
             </div>
           </div>
         </div>
