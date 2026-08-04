@@ -56,6 +56,12 @@ function todayIso() {
   return new Date().toISOString().split('T')[0];
 }
 
+// ✅ فاصله بین ارسال‌های broadcast (جلوگیری از rate-limit کاوه‌نگار)
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+const SMS_SEND_DELAY_MS = Number(process.env.SMS_SEND_DELAY_MS) || 400;
+
 /* =========================
    EXPIRY CHECK
 ========================= */
@@ -78,79 +84,12 @@ function checkExpiredMembers() {
     console.log(`- ${m.name} (${m.phone})`);
   });
 }
-function checkBirthdays() {
-const today = todayJalali();
 
-const [, month, day] = today.split('/');
-
-  const members = db
-    .prepare(`
-      SELECT *
-      FROM members
-      WHERE birthday IS NOT NULL
-    `)
-    .all();
-
-  const birthdayMembers = members.filter((m) => {
-    const parts = String(m.birthday).split('/');
-
-    if (parts.length !== 3) return false;
-
-    return parts[1] === month && parts[2] === day;
-  });
-
-  if (birthdayMembers.length === 0) {
-    console.log('[Birthday Check] No birthdays today');
-    return;
-  }
-
-  console.log(
-    `[Birthday Check] Found ${birthdayMembers.length} birthday(s)`
-  );
-
-  const sms = require('./services/smsService');
-
-  birthdayMembers.forEach((member) => {
-    sms.sendBirthday(member);
-  });
-}
-
-function checkExpiryReminders() {
-  const today = new Date();
-
-  const targetDates = [1, 3, 7].map((days) => {
-    const d = new Date();
-    d.setDate(today.getDate() + days);
-    return d.toISOString().split('T')[0];
-  });
-
-  const placeholders = targetDates.map(() => '?').join(',');
-
-  const members = db.prepare(`
-    SELECT *
-    FROM members
-    WHERE expiry_date IN (${placeholders})
-  `).all(...targetDates);
-
-  if (members.length === 0) {
-    console.log('[Expiry Reminder] No expiring members soon');
-    return;
-  }
-
-  console.log(
-    `[Expiry Reminder] Found ${members.length} member(s)`
-  );
-
-  const sms = require('./services/smsService');
-
-  members.forEach((member) => {
-    const daysLeft = Math.ceil(
-      (new Date(member.expiry_date) - today) / (1000 * 60 * 60 * 24)
-    );
-
-    sms.sendExpiryWarning(member, daysLeft);
-  });
-}
+// ⚠️ توجه: توابع checkBirthdays و checkExpiryReminders که قبلاً اینجا تعریف
+// شده بودند، هیچ‌وقت با cron.schedule صدا زده نمی‌شدند (کد مرده / بلااستفاده).
+// منطق واقعی تولد و یادآوری انقضا در services/cronManager.js اجرا می‌شود
+// (که توسط startCrons() در پایین همین فایل فعال می‌شود). برای جلوگیری از
+// دوباره‌کاری و سردرگمی، این توابع بلااستفاده از اینجا حذف شدند.
 
 /* =========================
    CRON
@@ -211,7 +150,7 @@ app.post('/members', (req, res) => {
       .prepare('SELECT * FROM members WHERE id = ?')
       .get(result.lastInsertRowid);
 
-    // 🔥 EVENT SYSTEM ( )
+    // 🔥 EVENT SYSTEM
     onMemberCreated(row);
 
     res.status(201).json(row);
@@ -310,7 +249,7 @@ app.get('/sms-logs', (req, res) => {
 /* =========================
    SMS SEND
 ========================= */
-app.post('/sms/send', (req, res) => {
+app.post('/sms/send', async (req, res) => {
   const { member_id, name, phone, message } = req.body || {};
 
   if (!phone || !String(phone).trim()) {
@@ -323,12 +262,15 @@ app.post('/sms/send', (req, res) => {
   try {
     const normalizedPhone = String(phone).trim();
     const normalizedMessage = String(message).trim();
-    const ok = sendSMS({
+
+    // ✅ FIX: قبلاً "status: 'mock'" اینجا هاردکد شده بود و صرف‌نظر از نتیجه‌ی
+    // واقعی ارسال، همیشه در دیتابیس mock ثبت می‌شد. الان status از روی نتیجه‌ی
+    // واقعی ارسال به کاوه‌نگار در خود smsService.js محاسبه می‌شود.
+    const ok = await sendSMS({
       member_id: member_id != null ? Number(member_id) : null,
       name: name != null ? String(name).trim() : '',
       phone: normalizedPhone,
       message: normalizedMessage,
-      status: 'mock',
     });
 
     const log = db.prepare('SELECT * FROM sms_logs ORDER BY id DESC LIMIT 1').get();
@@ -354,7 +296,7 @@ app.post('/sms/send', (req, res) => {
 /* =========================
    SMS BROADCAST
 ========================= */
-app.post('/sms/broadcast', (req, res) => {
+app.post('/sms/broadcast', async (req, res) => {
   const { recipients, message } = req.body || {};
 
   if (!Array.isArray(recipients) || recipients.length === 0) {
@@ -383,12 +325,12 @@ app.post('/sms/broadcast', (req, res) => {
     }
 
     try {
-      const ok = sendSMS({
+      // ✅ FIX: status:'mock' هاردکد حذف شد + await اضافه شد
+      const ok = await sendSMS({
         member_id: recipient.member_id != null ? Number(recipient.member_id) : null,
         name: recipient.name != null ? String(recipient.name).trim() : '',
         phone,
         message: normalizedMessage,
-        status: 'mock',
       });
 
       if (ok) {
@@ -407,7 +349,12 @@ app.post('/sms/broadcast', (req, res) => {
         error: err instanceof Error ? err.message : 'unknown error',
       });
     }
+
+    await delay(SMS_SEND_DELAY_MS); // ✅ فاصله بین ارسال‌ها
   }
+
+  // ✅ لاگ خلاصه
+  console.log(`[SMS BROADCAST SUMMARY] total=${recipients.length} success=${successCount} failed=${failureCount}`);
 
   res.json({
     success_count: successCount,
