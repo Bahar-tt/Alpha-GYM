@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { roleLabel } from '../lib/roles';
+import FeatureLockModal from './FeatureLockModal';
 import {
   LayoutDashboard,
   Users,
@@ -14,24 +15,39 @@ import {
   Menu,
   X,
   UserCog,
+  Wallet,
+  Lock,
+  Fingerprint,
 } from 'lucide-react';
 
-const navItems = [
+interface NavItem {
+  to: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  adminOnly: boolean;
+  feature?: string;
+}
+
+const navItems: NavItem[] = [
   { to: '/dashboard', label: 'داشبورد',          icon: LayoutDashboard, adminOnly: false },
   { to: '/members',   label: 'اعضا',              icon: Users,           adminOnly: false },
-  { to: '/renewals',  label: 'تمدیدها',           icon: RefreshCcw,      adminOnly: false },
-  { to: '/messaging', label: 'پیام‌رسانی هوشمند', icon: MessageSquare,   adminOnly: false },
+  { to: '/attendance', label: 'اسکنر انگشت',      icon: Fingerprint,     adminOnly: false, feature: 'attendance' },
+  { to: '/renewals',  label: 'تمدیدها',           icon: RefreshCcw,      adminOnly: true  },
+  { to: '/messaging', label: 'پیام‌رسانی هوشمند', icon: MessageSquare,   adminOnly: false, feature: 'messaging' },
   { to: '/sms-logs',  label: 'پیام‌ها',           icon: ScrollText,      adminOnly: true  },
   { to: '/broadcast', label: 'ارسال پیام',        icon: Send,            adminOnly: true  },
-  { to: '/coach',     label: 'پورتال مربی',       icon: Dumbbell,        adminOnly: true  },
+  { to: '/coach',     label: 'پورتال مربی',       icon: Dumbbell,        adminOnly: true,  feature: 'coach_portal' },
+  { to: '/accounting', label: 'حسابداری',         icon: Wallet,          adminOnly: true, feature: 'accounting' },
   { to: '/users',     label: 'مدیریت کاربران',    icon: UserCog,         adminOnly: true  },
 ];
 
 export default function Layout() {
-  const { profile, isAdmin, signOut } = useAuth();
+  const { profile, isAdmin, signOut, hasFeature } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [lockOpen, setLockOpen] = useState(false);
 
-  const visibleItems = navItems.filter((item) => !item.adminOnly || isAdmin);
+  const isCoach = profile?.role === 'coach';
+  const visibleItems = navItems.filter((item) => !item.adminOnly || isAdmin || (item.to === '/coach' && isCoach));
 
   return (
     <div className="min-h-screen bg-[#050505] flex" dir="rtl">
@@ -67,17 +83,34 @@ export default function Layout() {
 
         {/* Navigation */}
         <nav className="flex-1 p-4 space-y-1">
-          {visibleItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              onClick={() => setSidebarOpen(false)}
-              className={({ isActive }) => isActive ? 'nav-item-active' : 'nav-item'}
-            >
-              <item.icon size={20} />
-              <span className="text-sm font-medium">{item.label}</span>
-            </NavLink>
-          ))}
+          {visibleItems.map((item) => {
+            const isLocked = item.feature ? !hasFeature(item.feature) : false;
+            if (isLocked) {
+              return (
+                <button
+                  key={item.to}
+                  onClick={() => { setSidebarOpen(false); setLockOpen(true); }}
+                  className="nav-item w-full text-right"
+                  title="این بخش با اشتراک ماهانه فعال می‌شود"
+                >
+                  <item.icon size={20} />
+                  <span className="text-sm font-medium flex-1">{item.label}</span>
+                  <Lock size={14} className="text-gold-500/70" />
+                </button>
+              );
+            }
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                onClick={() => setSidebarOpen(false)}
+                className={({ isActive }) => isActive ? 'nav-item-active' : 'nav-item'}
+              >
+                <item.icon size={20} />
+                <span className="text-sm font-medium">{item.label}</span>
+              </NavLink>
+            );
+          })}
         </nav>
 
         {/* User info */}
@@ -129,6 +162,8 @@ export default function Layout() {
           <Outlet />
         </div>
       </main>
+
+      <FeatureLockModal open={lockOpen} onClose={() => setLockOpen(false)} />
     </div>
   );
 }

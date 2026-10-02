@@ -1,45 +1,122 @@
-import { apiDelete, apiGet, apiPost, apiPut, type ApiMember } from './api';
+import { apiDelete, apiGet, apiPost, apiPut, type ApiMember, type ApiMemberSport } from './api';
 
 export type MembershipType = 'monthly' | 'quarterly' | 'yearly' | 'vip';
+
+export type FeeBasis = 'session' | 'monthly';
+export type ClassType = 'group' | 'private' | 'personal';
+
+// ✅ هر ثبت‌نام ورزشی (اشتراک یک رشته)
+export interface SportEnrollment {
+  id: string;
+  sport: string;
+  sport_plan_key: string;
+  weekly_sessions: number;
+  total_sessions: number;
+  used_sessions: number;
+  tuition_amount: number | null;
+  fee_basis: FeeBasis;
+  class_type: ClassType;
+  start_date: string;
+  expiry_date: string;
+}
+
+export interface SportEnrollmentPayload {
+  sport: string;
+  sport_plan_key: string;
+  weekly_sessions: number;
+  total_sessions: number;
+  used_sessions: number;
+  tuition_amount: number | null;
+  fee_basis: FeeBasis;
+  class_type: ClassType;
+  start_date: string;
+  expiry_date: string;
+}
 
 export interface MemberFormPayload {
   full_name: string;
   phone: string;
+  member_code?: string | null;
   membership_type: MembershipType;
+  birthday: string;
+  goal?: string | null;
+  notes: string;
+  national_id: string;
+  referrer: string;
+  has_insurance: boolean;
+  start_date: string;
+  end_date: string;
+  // خلاصه (مشتق) برای سازگاری با صفحات قدیمی
   weekly_sessions: number;
   total_sessions: number;
   used_sessions: number;
-  start_date: string;
-  end_date: string;
-  birthday: string;
-  notes: string;
+  sport: string;
+  tuition_amount: number | null;
+  fee_basis: FeeBasis;
+  class_type: ClassType;
+  sports: SportEnrollmentPayload[];
 }
 
-export interface MemberRecord extends MemberFormPayload {
+export interface MemberRecord extends Omit<MemberFormPayload, 'sports'> {
   id: string;
   is_active?: boolean;
   created_at?: string;
+  created_by?: string | null;
+  updated_by?: string | null;
+  updated_at?: string | null;
+  sports: SportEnrollment[];
 }
 
 function todayIso(): string {
   return new Date().toISOString().split('T')[0];
 }
 
+function apiSportToRecord(s: ApiMemberSport): SportEnrollment {
+  return {
+    id: String(s.id),
+    sport: s.sport || '',
+    sport_plan_key: s.sport_plan_key || '',
+    weekly_sessions: s.weekly_sessions ?? 0,
+    total_sessions: s.total_sessions ?? 0,
+    used_sessions: s.used_sessions ?? 0,
+    tuition_amount: s.tuition_amount ?? null,
+    fee_basis: (s.fee_basis === 'session' ? 'session' : 'monthly'),
+    class_type: (s.class_type === 'private' ? 'private' : s.class_type === 'personal' ? 'personal' : 'group'),
+    start_date: s.start_date || '',
+    expiry_date: s.expiry_date || '',
+  };
+}
+
 function apiToRecord(row: ApiMember): MemberRecord {
   const active = row.expiry_date >= todayIso();
+  const sports = (row.sports || []).map(apiSportToRecord);
+  const fallbackSport = sports.length > 0 ? sports[0] : null;
   return {
     id: String(row.id),
     full_name: row.name,
     phone: row.phone,
+    member_code: row.member_code ? String(row.member_code) : null,
     end_date: row.expiry_date,
-    start_date: row.expiry_date,
-    weekly_sessions: row.weekly_sessions ?? 0,
-    membership_type: 'monthly',
-    total_sessions: 12,
-    used_sessions: 0,
+    start_date: row.start_date ?? row.expiry_date,
+    weekly_sessions: fallbackSport?.weekly_sessions ?? row.weekly_sessions ?? 0,
+    membership_type: (row.membership_type as MembershipType) || 'monthly',
+    total_sessions: fallbackSport?.total_sessions ?? row.total_sessions ?? 0,
+    used_sessions: fallbackSport?.used_sessions ?? row.used_sessions ?? 0,
     birthday: row.birthday ? String(row.birthday) : '',
-    notes: '',
+    goal: row.goal ?? null,
+    notes: row.notes ?? '',
+    national_id: row.national_id ?? '',
+    referrer: row.referrer ?? '',
+    sport: (sports.map((s) => s.sport).filter(Boolean).join(' + ')) || (row.sport ?? ''),
+    tuition_amount: fallbackSport?.tuition_amount ?? row.tuition_amount ?? null,
+    fee_basis: fallbackSport?.fee_basis ?? 'monthly',
+    class_type: fallbackSport?.class_type ?? 'group',
+    has_insurance: !!row.has_insurance,
     is_active: active,
+    created_by: row.created_by ?? null,
+    updated_by: row.updated_by ?? null,
+    updated_at: row.updated_at ?? null,
+    sports,
   };
 }
 
@@ -47,9 +124,27 @@ function payloadToApi(payload: MemberFormPayload) {
   return {
     name: payload.full_name.trim(),
     phone: payload.phone.trim(),
-    expiry_date: payload.end_date,
-    weekly_sessions: payload.weekly_sessions,
+    member_code: payload.member_code?.trim() ? payload.member_code.trim() : undefined,
     birthday: payload.birthday?.trim() || null,
+    national_id: payload.national_id?.trim() || null,
+    referrer: payload.referrer?.trim() || null,
+    has_insurance: payload.has_insurance ? 1 : 0,
+    notes: payload.notes?.trim() || null,
+    membership_type: payload.membership_type,
+    goal: payload.goal?.trim() || null,
+    start_date: payload.start_date,
+    sports: payload.sports.map((s) => ({
+      sport: s.sport.trim(),
+      sport_plan_key: s.sport_plan_key || null,
+      weekly_sessions: s.weekly_sessions,
+      total_sessions: s.total_sessions,
+      used_sessions: s.used_sessions,
+      tuition_amount: s.tuition_amount != null ? Number(s.tuition_amount) : null,
+      fee_basis: s.fee_basis,
+      class_type: s.class_type,
+      start_date: s.start_date,
+      expiry_date: s.expiry_date,
+    })),
   };
 }
 
@@ -84,6 +179,7 @@ export async function updateMember(id: string, updates: MemberFormPayload) {
   return { data: [apiToRecord(result.data)], error: null };
 }
 
+// ✅ تمدید سریع (سازگاری): همه‌ی رشته‌های عضو به تاریخ جدید تمدید می‌شوند
 export async function updateMemberExpiry(id: string, expiryDate: string, weeklySessions?: number) {
   const getOne = await apiGet<ApiMember[]>('/members');
   if (getOne.error || !getOne.data) {

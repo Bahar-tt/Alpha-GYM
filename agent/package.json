@@ -1,0 +1,13 @@
+{
+  "name": "alpha-gym-fingerprint-agent",
+  "version": "1.0.0",
+  "description": "Alpha Gym Fingerprint Scanner Agent (FOH02 / RFT-200-Mifer)",
+  "main": "fingerprint-agent.js",
+  "scripts": {
+    "start": "node fingerprint-agent.js"
+  },
+  "dependencies": {
+    "ffi-napi": "4.0.3",
+    "ref-napi": "3.0.3"
+  }
+}

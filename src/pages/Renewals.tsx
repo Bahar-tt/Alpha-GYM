@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { loadJson, saveJson } from '../lib/localStore';
+
+
 import { getMembers, isMemberActive, updateMemberExpiry, type MemberRecord } from '../services/memberService';
+import {
+  getRenewals, createRenewal, updateRenewalStatus,
+  type Renewal, type RenewalStatus,
+} from '../services/renewalService';
 import {
   Plus,
   Search,
@@ -11,21 +16,6 @@ import {
   X,
   DollarSign,
 } from 'lucide-react';
-
-const RENEWALS_KEY = 'alpha_gym_renewals';
-
-interface Renewal {
-  id: string;
-  member_id: string;
-  old_end_date: string;
-  new_end_date: string;
-  membership_type: string;
-  amount: number;
-  status: 'pending' | 'completed' | 'cancelled';
-  renewed_by: string | null;
-  created_at: string;
-  members?: { full_name: string; phone: string };
-}
 
 const statusConfig = {
   pending: { label: 'در انتظار', icon: Clock, color: 'text-amber-400', bg: 'bg-amber-500/10' },
@@ -41,7 +31,7 @@ const membershipLabels: Record<string, string> = {
 };
 
 export default function Renewals() {
-  const { user, isAdmin } = useAuth();
+  const { user } = useAuth();
   const [renewals, setRenewals] = useState<Renewal[]>([]);
   const [members, setMembers] = useState<MemberRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,18 +53,8 @@ export default function Renewals() {
 
   const fetchRenewals = async () => {
     setLoading(true);
-    const stored = loadJson<Renewal[]>(RENEWALS_KEY, []);
-    const { data: memberList } = await getMembers();
-    const byId = new Map((memberList || []).map((m) => [m.id, m]));
-    const enriched = stored
-      .map((r) => ({
-        ...r,
-        members: byId.get(r.member_id)
-          ? { full_name: byId.get(r.member_id)!.full_name, phone: byId.get(r.member_id)!.phone }
-          : undefined,
-      }))
-      .sort((a, b) => b.created_at.localeCompare(a.created_at));
-    setRenewals(enriched);
+    const { data } = await getRenewals();
+    setRenewals(data || []);
     setLoading(false);
   };
 
@@ -84,8 +64,8 @@ export default function Renewals() {
   };
 
   const filteredRenewals = renewals.filter((r) => {
-    const name = r.members?.full_name || '';
-    const phone = r.members?.phone || '';
+    const name = r.member_name || '';
+    const phone = r.member_phone || '';
     const matchesSearch = name.includes(search) || phone.includes(search);
     const matchesFilter = filterStatus === 'all' || r.status === filterStatus;
     return matchesSearch && matchesFilter;
@@ -114,23 +94,15 @@ export default function Renewals() {
       await updateMemberExpiry(form.member_id, form.new_end_date, member.weekly_sessions);
     }
 
-    const renewal: Renewal = {
-      id: String(Date.now()),
-      member_id: form.member_id,
-      old_end_date: member?.end_date || '',
-      new_end_date: form.new_end_date,
+    await createRenewal({
+      member_id: Number(form.member_id),
       membership_type: form.membership_type,
+      old_end_date: member?.end_date || undefined,
+      new_end_date: form.new_end_date || undefined,
       amount: form.amount,
       status: 'completed',
       renewed_by: user?.id || null,
-      created_at: new Date().toISOString(),
-      members: member
-        ? { full_name: member.full_name, phone: member.phone }
-        : undefined,
-    };
-
-    const list = loadJson<Renewal[]>(RENEWALS_KEY, []);
-    saveJson(RENEWALS_KEY, [renewal, ...list]);
+    });
 
     setShowModal(false);
     setSubmitting(false);
@@ -138,18 +110,16 @@ export default function Renewals() {
     fetchMembers();
   };
 
-  const updateRenewalStatus = async (id: string, status: string) => {
-    const list = loadJson<Renewal[]>(RENEWALS_KEY, []);
-    saveJson(
-      RENEWALS_KEY,
-      list.map((r) => (r.id === id ? { ...r, status: status as Renewal['status'] } : r))
-    );
+  const handleStatusChange = async (id: number, status: RenewalStatus) => {
+    await updateRenewalStatus(id, status);
     fetchRenewals();
   };
 
   const totalRevenue = renewals
     .filter((r) => r.status === 'completed')
     .reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+
+  const toFa = (n: number) => n.toLocaleString('fa-IR');
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -163,20 +133,18 @@ export default function Renewals() {
       </div>
 
       {/* Summary cards */}
-      <div className={`grid grid-cols-1 gap-4 ${isAdmin ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
-        {isAdmin && (
-          <div className="stat-card">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-gold-500/10 flex items-center justify-center">
-                <DollarSign size={20} className="text-gold-400" />
-              </div>
-              <div>
-                <p className="text-xl font-bold text-white">{totalRevenue.toLocaleString('fa-IR')} ت</p>
-                <p className="text-xs text-gray-500">کل درآمد تمدیدها</p>
-              </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="stat-card">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-gold-500/10 flex items-center justify-center">
+              <DollarSign size={20} className="text-gold-400" />
+            </div>
+            <div>
+              <p className="text-xl font-bold text-white">{toFa(totalRevenue)} ت</p>
+              <p className="text-xs text-gray-500">کل درآمد تمدیدها</p>
             </div>
           </div>
-        )}
+        </div>
         <div className="stat-card">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
@@ -184,7 +152,7 @@ export default function Renewals() {
             </div>
             <div>
               <p className="text-xl font-bold text-white">
-                {renewals.filter((r) => r.status === 'completed').length}
+                {toFa(renewals.filter((r) => r.status === 'completed').length)}
               </p>
               <p className="text-xs text-gray-500">تمدید تکمیل شده</p>
             </div>
@@ -197,7 +165,7 @@ export default function Renewals() {
             </div>
             <div>
               <p className="text-xl font-bold text-white">
-                {renewals.filter((r) => r.status === 'pending').length}
+                {toFa(renewals.filter((r) => r.status === 'pending').length)}
               </p>
               <p className="text-xs text-gray-500">در انتظار تمدید</p>
             </div>
@@ -240,32 +208,23 @@ export default function Renewals() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-gold-500/10">
-                {[
-                  'عضو',
-                  'نوع عضویت',
-                  'تاریخ پایان قبلی',
-                  'تاریخ پایان جدید',
-                  ...(isAdmin ? ['مبلغ'] : []),
-                  'وضعیت',
-                  'عملیات',
-                ].map((h) => (
-                    <th key={h} className="text-right text-xs font-medium text-gray-500 px-4 py-3">
-                      {h}
-                    </th>
-                  )
-                )}
+                {['عضو', 'نوع عضویت', 'تاریخ پایان قبلی', 'تاریخ پایان جدید', 'مبلغ', 'وضعیت', 'عملیات'].map((h) => (
+                  <th key={h} className="text-right text-xs font-medium text-gray-500 px-4 py-3">
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={isAdmin ? 7 : 6} className="text-center py-12 text-gray-500">
+                  <td colSpan={7} className="text-center py-12 text-gray-500">
                     <div className="w-6 h-6 border-2 border-gold-500/30 border-t-gold-500 rounded-full animate-spin mx-auto" />
                   </td>
                 </tr>
               ) : filteredRenewals.length === 0 ? (
                 <tr>
-                  <td colSpan={isAdmin ? 7 : 6} className="text-center py-12 text-gray-500">
+                  <td colSpan={7} className="text-center py-12 text-gray-500">
                     تمدیدی یافت نشد
                   </td>
                 </tr>
@@ -274,23 +233,21 @@ export default function Renewals() {
                   const cfg = statusConfig[r.status];
                   return (
                     <tr key={r.id} className="table-row">
-                      <td className="px-4 py-3 text-sm text-white">{r.members?.full_name || '—'}</td>
+                      <td className="px-4 py-3 text-sm text-white">{r.member_name || '—'}</td>
                       <td className="px-4 py-3">
                         <span className="text-xs px-2 py-1 rounded-full bg-gold-500/10 text-gold-400">
-                          {membershipLabels[r.membership_type]}
+                          {membershipLabels[r.membership_type || ''] || r.membership_type}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-400">
-                        {new Date(r.old_end_date).toLocaleDateString('fa-IR')}
+                        {r.old_end_date ? new Date(r.old_end_date).toLocaleDateString('fa-IR') : '—'}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-400">
-                        {new Date(r.new_end_date).toLocaleDateString('fa-IR')}
+                        {r.new_end_date ? new Date(r.new_end_date).toLocaleDateString('fa-IR') : '—'}
                       </td>
-                      {isAdmin && (
-                        <td className="px-4 py-3 text-sm text-gold-400 font-medium">
-                          {Number(r.amount).toLocaleString('fa-IR')} ت
-                        </td>
-                      )}
+                      <td className="px-4 py-3 text-sm text-gold-400 font-medium">
+                        {toFa(Number(r.amount) || 0)} ت
+                      </td>
                       <td className="px-4 py-3">
                         <span className={`text-xs px-2 py-1 rounded-full ${cfg.bg} ${cfg.color} flex items-center gap-1 w-fit`}>
                           <cfg.icon size={12} />
@@ -301,14 +258,16 @@ export default function Renewals() {
                         {r.status === 'pending' && (
                           <div className="flex items-center gap-2">
                             <button
-                              onClick={() => updateRenewalStatus(r.id, 'completed')}
+                              onClick={() => handleStatusChange(r.id, 'completed')}
                               className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-gray-400 hover:text-emerald-400 transition-colors"
+                              title="تکمیل"
                             >
                               <CheckCircle size={16} />
                             </button>
                             <button
-                              onClick={() => updateRenewalStatus(r.id, 'cancelled')}
+                              onClick={() => handleStatusChange(r.id, 'cancelled')}
                               className="p-1.5 rounded-lg hover:bg-red-500/10 text-gray-400 hover:text-red-400 transition-colors"
+                              title="لغو"
                             >
                               <XCircle size={16} />
                             </button>
@@ -353,12 +312,12 @@ export default function Renewals() {
                 </select>
               </div>
 
-              <div className={isAdmin ? 'grid grid-cols-2 gap-4' : ''}>
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm text-gray-400 mb-1.5">نوع عضویت جدید</label>
                   <select
                     value={form.membership_type}
-                    onChange={(e) => setForm({ ...form, membership_type: e.target.value as any })}
+                    onChange={(e) => setForm({ ...form, membership_type: e.target.value as 'monthly' | 'quarterly' | 'yearly' | 'vip' })}
                     className="input-dark"
                   >
                     <option value="monthly">ماهانه</option>
@@ -367,17 +326,15 @@ export default function Renewals() {
                     <option value="vip">VIP</option>
                   </select>
                 </div>
-                {isAdmin && (
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-1.5">مبلغ (تومان)</label>
-                    <input
-                      type="number"
-                      value={form.amount}
-                      onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })}
-                      className="input-dark"
-                    />
-                  </div>
-                )}
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1.5">مبلغ (تومان)</label>
+                  <input
+                    type="number"
+                    value={form.amount}
+                    onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })}
+                    className="input-dark"
+                  />
+                </div>
               </div>
 
               <div>

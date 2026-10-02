@@ -1,5 +1,5 @@
 require('dotenv').config();
-const Database = require('better-sqlite3');
+const Database = require('../sqlite-wrapper');
 const path     = require('path');
 const https    = require('https');
 const dns      = require('dns');

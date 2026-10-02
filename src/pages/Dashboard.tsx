@@ -1,17 +1,12 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getMembers, isMemberActive, type MemberRecord } from '../services/memberService';
-import { loadJson } from '../lib/localStore';
+import { getRenewals } from '../services/renewalService';
 import WolfLogo from '../components/WolfLogo';
 import {
-  Users,
-  UserCheck,
-  UserX,
-  RefreshCcw,
-  TrendingUp,
-  AlertTriangle,
-  DollarSign,
-  Calendar,
+  Users, UserCheck, UserX, RefreshCcw, TrendingUp,
+  AlertTriangle, DollarSign, Calendar,
 } from 'lucide-react';
 
 interface Stats {
@@ -23,149 +18,104 @@ interface Stats {
   monthlyRevenue: number;
 }
 
-const RENEWALS_KEY = 'alpha_gym_renewals';
-
-interface StoredRenewal {
-  amount: number;
-  status: string;
-  created_at: string;
-}
-
-function todayIso(): string {
-  return new Date().toISOString().split('T')[0];
-}
-
+function todayIso(): string { return new Date().toISOString().split('T')[0]; }
 function weekEndIso(): string {
   return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 }
 
 export default function Dashboard() {
   const { isAdmin } = useAuth();
+  const navigate = useNavigate();
   const [stats, setStats] = useState<Stats>({
-    totalMembers: 0,
-    activeMembers: 0,
-    inactiveMembers: 0,
-    expiringThisWeek: 0,
-    totalRenewals: 0,
-    monthlyRevenue: 0,
+    totalMembers: 0, activeMembers: 0, inactiveMembers: 0,
+    expiringThisWeek: 0, totalRenewals: 0, monthlyRevenue: 0,
   });
-  const [recentMembers, setRecentMembers] = useState<MemberRecord[]>([]);
+  const [recentMembers, setRecentMembers]   = useState<MemberRecord[]>([]);
   const [expiringMembers, setExpiringMembers] = useState<MemberRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, [isAdmin]);
+  useEffect(() => { fetchDashboardData(); }, [isAdmin]);
 
   const fetchDashboardData = async () => {
     const { data: members, error } = await getMembers();
-    if (error) {
-      console.error('Dashboard fetchMembers:', error);
-      setLoading(false);
-      return;
-    }
+    if (error) { console.error('Dashboard fetchMembers:', error); setLoading(false); return; }
+    setLastUpdated(new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }));
 
-    const list = members || [];
-    const today = todayIso();
+    const list    = members || [];
+    const today   = todayIso();
     const weekEnd = weekEndIso();
 
-    const active = list.filter((m) => isMemberActive(m.end_date));
+    const active   = list.filter((m) => isMemberActive(m.end_date));
     const inactive = list.filter((m) => !isMemberActive(m.end_date));
+    const expiring = active.filter((m) => m.end_date >= today && m.end_date <= weekEnd);
 
-    // Only include members whose end_date is between today and 7 days from now
-    const expiring = active.filter(
-      (m) => m.end_date >= today && m.end_date <= weekEnd
-    );
-
-    // Sort by created_at descending to show the newest members first
     const recent = [...list]
       .sort((a, b) => {
-        const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
-        return dateB - dateA;
+        const dA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const dB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return dB - dA;
       })
       .slice(0, 5);
 
-    let totalRenewals = 0;
-    let monthlyRevenue = 0;
-
+    let totalRenewals = 0, monthlyRevenue = 0;
     if (isAdmin) {
-      const renewals = loadJson<StoredRenewal[]>(RENEWALS_KEY, []);
+      const { data: renewals } = await getRenewals();
+      const list = renewals || [];
       const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      const monthRenewals = renewals.filter(
-        (r) => r.status === 'completed' && r.created_at >= monthAgo
-      );
-      totalRenewals = monthRenewals.length;
-      monthlyRevenue = monthRenewals.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+      const monthR = list.filter((r) => r.status === 'completed' && r.created_at >= monthAgo);
+      totalRenewals  = monthR.length;
+      monthlyRevenue = monthR.reduce((s, r) => s + (Number(r.amount) || 0), 0);
     }
 
     setStats({
-      totalMembers: list.length,
-      activeMembers: active.length,
-      inactiveMembers: inactive.length,
-      expiringThisWeek: expiring.length,
-      totalRenewals,
-      monthlyRevenue,
+      totalMembers: list.length, activeMembers: active.length,
+      inactiveMembers: inactive.length, expiringThisWeek: expiring.length,
+      totalRenewals, monthlyRevenue,
     });
     setRecentMembers(recent);
     setExpiringMembers(expiring.slice(0, 5));
     setLoading(false);
   };
 
+  // ✅ هر کارت یه filter داره که به صفحه اعضا میفرسته
   const statCards = [
     {
-      label: 'کل اعضا',
-      value: stats.totalMembers,
-      icon: Users,
-      color: 'from-gold-500/20 to-gold-600/5',
-      iconColor: 'text-gold-400',
+      label: 'کل اعضا', value: stats.totalMembers,
+      icon: Users, color: 'from-gold-500/20 to-gold-600/5', iconColor: 'text-gold-400',
+      filter: 'all',
     },
     {
-      label: 'اعضای فعال',
-      value: stats.activeMembers,
-      icon: UserCheck,
-      color: 'from-emerald-500/20 to-emerald-600/5',
-      iconColor: 'text-emerald-400',
+      label: 'اعضای فعال', value: stats.activeMembers,
+      icon: UserCheck, color: 'from-emerald-500/20 to-emerald-600/5', iconColor: 'text-emerald-400',
+      filter: 'active',
     },
     {
-      label: 'اعضای غیرفعال',
-      value: stats.inactiveMembers,
-      icon: UserX,
-      color: 'from-red-500/20 to-red-600/5',
-      iconColor: 'text-red-400',
+      label: 'اعضای غیرفعال', value: stats.inactiveMembers,
+      icon: UserX, color: 'from-red-500/20 to-red-600/5', iconColor: 'text-red-400',
+      filter: 'inactive',
     },
     {
-      label: 'منقضی این هفته',
-      value: stats.expiringThisWeek,
-      icon: AlertTriangle,
-      color: 'from-amber-500/20 to-amber-600/5',
-      iconColor: 'text-amber-400',
+      label: 'منقضی این هفته', value: stats.expiringThisWeek,
+      icon: AlertTriangle, color: 'from-amber-500/20 to-amber-600/5', iconColor: 'text-amber-400',
+      filter: 'expiring',
     },
-    ...(isAdmin
-      ? [
-          {
-            label: 'تمدید این ماه',
-            value: stats.totalRenewals,
-            icon: RefreshCcw,
-            color: 'from-blue-500/20 to-blue-600/5',
-            iconColor: 'text-blue-400',
-          },
-          {
-            label: 'درآمد ماهانه',
-            value: `${stats.monthlyRevenue.toLocaleString('fa-IR')} ت`,
-            icon: DollarSign,
-            color: 'from-gold-500/20 to-gold-600/5',
-            iconColor: 'text-gold-400',
-          },
-        ]
-      : []),
+    ...(isAdmin ? [
+      {
+        label: 'تمدید این ماه', value: stats.totalRenewals,
+        icon: RefreshCcw, color: 'from-blue-500/20 to-blue-600/5', iconColor: 'text-blue-400',
+        filter: null,
+      },
+      {
+        label: 'درآمد ماهانه', value: `${stats.monthlyRevenue.toLocaleString('fa-IR')} ت`,
+        icon: DollarSign, color: 'from-gold-500/20 to-gold-600/5', iconColor: 'text-gold-400',
+        filter: null,
+      },
+    ] : []),
   ];
 
   const persianDate = new Date().toLocaleDateString('fa-IR', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
   });
 
   return (
@@ -180,22 +130,32 @@ export default function Dashboard() {
         </div>
         <div className="flex items-center gap-2 text-sm text-gray-400">
           <Calendar size={16} />
-          <span>آخرین بروزرسانی: همین الان</span>
+          <span>{lastUpdated ? `آخرین بروزرسانی: ${lastUpdated}` : 'در حال بارگذاری...'}</span>
         </div>
       </div>
 
+      {/* ✅ کارت‌های کلیک‌پذیر */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         {statCards.map((card, i) => (
           <div
             key={card.label}
-            className="stat-card animate-slide-in"
+            className={`stat-card animate-slide-in transition-all duration-200 ${
+              card.filter
+                ? 'cursor-pointer hover:border-gold-500/60 hover:scale-[1.02] hover:shadow-xl hover:shadow-gold-500/10'
+                : ''
+            }`}
             style={{ animationDelay: `${i * 80}ms` }}
+            onClick={() => card.filter && navigate(`/members?filter=${card.filter}`)}
+            title={card.filter ? `مشاهده ${card.label}` : undefined}
           >
             <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${card.color} flex items-center justify-center mb-3`}>
               <card.icon size={20} className={card.iconColor} />
             </div>
             <p className="text-2xl font-bold text-white">{card.value}</p>
             <p className="text-xs text-gray-500 mt-1">{card.label}</p>
+            {card.filter && (
+              <p className="text-xs text-gold-500/50 mt-1">کلیک برای مشاهده ←</p>
+            )}
           </div>
         ))}
       </div>
@@ -207,11 +167,7 @@ export default function Dashboard() {
             <TrendingUp size={18} className="text-gold-400" />
           </div>
           {loading ? (
-            <div className="space-y-3">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="h-12 bg-white/5 rounded-lg animate-pulse" />
-              ))}
-            </div>
+            <div className="space-y-3">{[1,2,3].map((i) => <div key={i} className="h-12 bg-white/5 rounded-lg animate-pulse" />)}</div>
           ) : recentMembers.length === 0 ? (
             <p className="text-gray-500 text-sm text-center py-8">هنوز عضوی ثبت نشده است</p>
           ) : (
@@ -227,9 +183,7 @@ export default function Dashboard() {
                       <p className="text-xs text-gray-500">{m.phone}</p>
                     </div>
                   </div>
-                  <span
-                    className={`text-xs px-2 py-1 rounded-full ${m.is_active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}
-                  >
+                  <span className={`text-xs px-2 py-1 rounded-full ${m.is_active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
                     {m.is_active ? 'فعال' : 'غیرفعال'}
                   </span>
                 </div>
@@ -244,11 +198,7 @@ export default function Dashboard() {
             <AlertTriangle size={18} className="text-amber-400" />
           </div>
           {loading ? (
-            <div className="space-y-3">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="h-12 bg-white/5 rounded-lg animate-pulse" />
-              ))}
-            </div>
+            <div className="space-y-3">{[1,2,3].map((i) => <div key={i} className="h-12 bg-white/5 rounded-lg animate-pulse" />)}</div>
           ) : expiringMembers.length === 0 ? (
             <p className="text-gray-500 text-sm text-center py-8">اعضای در حال انقضایی یافت نشد</p>
           ) : (
@@ -266,7 +216,7 @@ export default function Dashboard() {
                   </div>
                   <div className="text-left">
                     <p className="text-xs text-amber-400">{new Date(m.end_date).toLocaleDateString('fa-IR')}</p>
-                    <p className="text-xs text-gray-500">{m.membership_type}</p>
+                    <p className="text-xs text-gray-500">{m.sport || '—'}</p>
                   </div>
                 </div>
               ))}
@@ -276,7 +226,7 @@ export default function Dashboard() {
       </div>
 
       <div className="glass-card p-6">
-        <h3 className="text-lg font-semibold text-white mb-4">توزیع نوع عضویت</h3>
+        <h3 className="text-lg font-semibold text-white mb-4">توزیع رشته‌های ورزشی (اعضای فعال)</h3>
         <MembershipChart />
       </div>
     </div>
@@ -285,13 +235,7 @@ export default function Dashboard() {
 
 function MembershipChart() {
   const [data, setData] = useState<{ type: string; count: number }[]>([]);
-  const colors = ['bg-gold-500', 'bg-emerald-500', 'bg-blue-500', 'bg-red-500'];
-  const labels: Record<string, string> = {
-    monthly: 'ماهانه',
-    quarterly: 'سه ماهه',
-    yearly: 'سالانه',
-    vip: 'VIP',
-  };
+  const colors = ['bg-gold-500', 'bg-emerald-500', 'bg-blue-500', 'bg-red-500', 'bg-amber-500', 'bg-purple-500'];
 
   useEffect(() => {
     getMembers().then(({ data: rows }) => {
@@ -299,9 +243,14 @@ function MembershipChart() {
         const active = rows.filter((m) => isMemberActive(m.end_date));
         const counts: Record<string, number> = {};
         active.forEach((r) => {
-          counts[r.membership_type] = (counts[r.membership_type] || 0) + 1;
+          const sports = (r.sports && r.sports.length > 0 ? r.sports.map((s) => s.sport).filter(Boolean) : [r.sport]);
+          (sports.length > 0 ? sports : ['بدون رشته']).forEach((sport) => {
+            const key = (sport && sport.trim()) || 'بدون رشته';
+            counts[key] = (counts[key] || 0) + 1;
+          });
         });
-        setData(Object.entries(counts).map(([type, count]) => ({ type, count })));
+        const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+        setData(sorted.map(([type, count]) => ({ type, count })));
       }
     });
   }, []);
@@ -315,14 +264,12 @@ function MembershipChart() {
       ) : (
         data.map((d, i) => (
           <div key={d.type} className="flex items-center gap-4">
-            <span className="text-sm text-gray-400 w-20">{labels[d.type] || d.type}</span>
+            <span className="text-sm text-gray-400 w-32 truncate">{d.type}</span>
             <div className="flex-1 h-8 bg-white/5 rounded-full overflow-hidden">
-              <div
-                className={`h-full ${colors[i % colors.length]} rounded-full transition-all duration-1000`}
-                style={{ width: `${(d.count / max) * 100}%` }}
-              />
+              <div className={`h-full ${colors[i % colors.length]} rounded-full transition-all duration-1000`}
+                style={{ width: `${(d.count / max) * 100}%` }} />
             </div>
-            <span className="text-sm font-bold text-white w-8 text-left">{d.count}</span>
+            <span className="text-sm font-bold text-white w-8 text-left">{d.count.toLocaleString('fa-IR')}</span>
           </div>
         ))
       )}

@@ -7,10 +7,11 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "better-sqlite3": "^11.10.0",
     "cors": "^2.8.5",
+    "dotenv": "^18.0.4",
     "express": "^4.21.2",
     "jalali-moment": "^3.3.11",
-    "node-cron": "^3.0.3"
+    "node-cron": "^3.0.3",
+    "xlsx": "^0.18.5"
   }
 }

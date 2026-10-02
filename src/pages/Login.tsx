@@ -1,17 +1,28 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Lock, User } from 'lucide-react';
+import { Eye, EyeOff, Lock, User, KeyRound } from 'lucide-react';
+import { apiPost } from '../services/api';
+
+
+
+type LoginStep = 'login' | 'forgot' | 'reset';
 
 export default function Login() {
   const { signIn } = useAuth();
   const navigate = useNavigate();
 
+  const [step, setStep] = useState<LoginStep>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // مراحل بازیابی
+  const [resetCode, setResetCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [resetSuccess, setResetSuccess] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,6 +31,38 @@ export default function Login() {
     const { error: err } = await signIn(username, password);
     if (err) setError(err);
     else navigate('/dashboard');
+    setLoading(false);
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    const { error: err } = await apiPost('/auth/forgot-password', { username });
+    if (err) setError(err);
+    else setStep('reset');
+    setLoading(false);
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    const { error: err } = await apiPost('/auth/reset-password', {
+      username,
+      code: resetCode,
+      new_password: newPassword,
+    });
+    if (err) setError(err);
+    else {
+      setResetSuccess(true);
+      setTimeout(() => {
+        setStep('login');
+        setResetSuccess(false);
+        setResetCode('');
+        setNewPassword('');
+      }, 2000);
+    }
     setLoading(false);
   };
 
@@ -268,9 +311,202 @@ export default function Login() {
             </button>
           </form>
 
-          <p className="text-center mt-4" style={{ fontSize: '0.63rem', color: 'rgba(255, 255, 255, 0.34)' }}>
-            برای دریافت دسترسی با مدیر سیستم تماس بگیرید
-          </p>
+          {step === 'login' && (
+            <>
+              <button
+                type="button"
+                onClick={() => { setStep('forgot'); setError(''); }}
+                className="block mx-auto mt-3"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'rgba(212, 168, 67, 0.5)',
+                  fontSize: '0.7rem',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  textDecoration: 'underline',
+                }}
+              >
+                رمز عبور را فراموش کرده‌ام
+              </button>
+
+              <p className="text-center mt-4" style={{ fontSize: '0.63rem', color: 'rgba(255, 255, 255, 0.34)' }}>
+                برای دریافت دسترسی با مدیر سیستم تماس بگیرید
+              </p>
+            </>
+          )}
+
+          {step === 'forgot' && (
+            <form onSubmit={handleForgotPassword} className="space-y-3">
+              <p className="text-center mb-2" style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.5)' }}>
+                نام کاربری خود را وارد کنید تا کد بازیابی ارسال شود
+              </p>
+
+              {error && (
+                <div className="mb-3 p-3 rounded-xl text-sm" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171' }}>
+                  {error}
+                </div>
+              )}
+
+              <div className="relative">
+                <User size={15} className="absolute" style={{ right: 13, top: '50%', transform: 'translateY(-50%)', color: 'rgba(212,168,67,0.32)', pointerEvents: 'none' }} />
+                <input
+                  type="text"
+                  placeholder="نام کاربری"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  required
+                  style={{
+                    width: '100%', boxSizing: 'border-box',
+                    background: 'rgba(255,255,255,0.03)',
+                    border: '1px solid rgba(212,168,67,0.1)',
+                    borderRadius: 11,
+                    padding: '13px 42px 13px 14px',
+                    color: 'rgba(255,255,255,0.75)',
+                    fontFamily: 'inherit', fontSize: '0.84rem', outline: 'none',
+                  }}
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                style={{
+                  width: '100%',
+                  padding: '14px',
+                  border: 'none',
+                  borderRadius: 11,
+                  fontFamily: 'inherit',
+                  fontSize: '0.88rem',
+                  fontWeight: 700,
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                  color: '#140a00',
+                  background: loading
+                    ? 'rgba(212,168,67,0.4)'
+                    : 'linear-gradient(135deg,#b8860b 0%,#d4a843 30%,#f0cc60 55%,#d4a843 75%,#8b5e0a 100%)',
+                }}
+              >
+                {loading ? 'در حال ارسال...' : 'ارسال کد بازیابی'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setStep('login'); setError(''); }}
+                className="block mx-auto mt-2"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'rgba(255,255,255,0.4)',
+                  fontSize: '0.7rem',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                ← بازگشت به ورود
+              </button>
+            </form>
+          )}
+
+          {step === 'reset' && (
+            <form onSubmit={handleResetPassword} className="space-y-3">
+              <p className="text-center mb-2" style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.5)' }}>
+                کد ۶ رقمی ارسال‌شده و رمز عبور جدید را وارد کنید
+              </p>
+
+              {resetSuccess && (
+                <div className="mb-3 p-3 rounded-xl text-sm" style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)', color: '#4ade80' }}>
+                  رمز عبور با موفقیت تغییر کرد! در حال انتقال به صفحه ورود...
+                </div>
+              )}
+
+              {error && (
+                <div className="mb-3 p-3 rounded-xl text-sm" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171' }}>
+                  {error}
+                </div>
+              )}
+
+              <div className="relative">
+                <KeyRound size={15} className="absolute" style={{ right: 13, top: '50%', transform: 'translateY(-50%)', color: 'rgba(212,168,67,0.32)', pointerEvents: 'none' }} />
+                <input
+                  type="text"
+                  placeholder="کد ۶ رقمی"
+                  value={resetCode}
+                  onChange={(e) => setResetCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  required
+                  maxLength={6}
+                  style={{
+                    width: '100%', boxSizing: 'border-box',
+                    background: 'rgba(255,255,255,0.03)',
+                    border: '1px solid rgba(212,168,67,0.1)',
+                    borderRadius: 11,
+                    padding: '13px 42px 13px 14px',
+                    color: 'rgba(255,255,255,0.75)',
+                    fontFamily: 'inherit', fontSize: '0.84rem', outline: 'none',
+                    textAlign: 'center',
+                    letterSpacing: '8px',
+                  }}
+                />
+              </div>
+
+              <div className="relative">
+                <Lock size={15} className="absolute" style={{ right: 13, top: '50%', transform: 'translateY(-50%)', color: 'rgba(212,168,67,0.32)', pointerEvents: 'none' }} />
+                <input
+                  type="password"
+                  placeholder="رمز عبور جدید"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  required
+                  minLength={6}
+                  style={{
+                    width: '100%', boxSizing: 'border-box',
+                    background: 'rgba(255,255,255,0.03)',
+                    border: '1px solid rgba(212,168,67,0.1)',
+                    borderRadius: 11,
+                    padding: '13px 42px 13px 14px',
+                    color: 'rgba(255,255,255,0.75)',
+                    fontFamily: 'inherit', fontSize: '0.84rem', outline: 'none',
+                  }}
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading || resetCode.length !== 6}
+                style={{
+                  width: '100%',
+                  padding: '14px',
+                  border: 'none',
+                  borderRadius: 11,
+                  fontFamily: 'inherit',
+                  fontSize: '0.88rem',
+                  fontWeight: 700,
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                  color: '#140a00',
+                  background: loading
+                    ? 'rgba(212,168,67,0.4)'
+                    : 'linear-gradient(135deg,#b8860b 0%,#d4a843 30%,#f0cc60 55%,#d4a843 75%,#8b5e0a 100%)',
+                }}
+              >
+                {loading ? 'در حال تغییر رمز...' : 'تغییر رمز عبور'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setStep('login'); setError(''); setResetCode(''); setNewPassword(''); }}
+                className="block mx-auto mt-2"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'rgba(255,255,255,0.4)',
+                  fontSize: '0.7rem',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                ← بازگشت به ورود
+              </button>
+            </form>
+          )}
         </div>
       </div>
     </div>

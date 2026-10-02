@@ -1,0 +1,113 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 33% 97%;
+    --foreground: 30 10% 15%;
+    --card: 0 0% 100%;
+    --card-foreground: 30 10% 15%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 30 10% 15%;
+    --primary: 24 85% 48%;
+    --primary-foreground: 40 33% 98%;
+    --secondary: 36 30% 90%;
+    --secondary-foreground: 30 10% 20%;
+    --muted: 36 20% 92%;
+    --muted-foreground: 30 5% 45%;
+    --accent: 30 60% 92%;
+    --accent-foreground: 24 85% 35%;
+    --destructive: 0 72% 50%;
+    --destructive-foreground: 40 33% 98%;
+    --border: 36 20% 88%;
+    --input: 36 20% 88%;
+    --ring: 24 85% 48%;
+    --radius: 0.75rem;
+    --chart-1: 24 85% 48%;
+    --chart-2: 36 60% 55%;
+    --chart-3: 20 70% 40%;
+    --chart-4: 45 70% 60%;
+    --chart-5: 30 40% 70%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "ss01", "cv01";
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .perspective-1000 {
+    perspective: 1000px;
+  }
+  .preserve-3d {
+    transform-style: preserve-3d;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-track {
+  background: hsl(36 20% 92%);
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(24 60% 55%);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(24 85% 48%);
+}
+
+/* Smooth scroll */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Selection */
+::selection {
+  background: hsl(24 85% 48%);
+  color: hsl(40 33% 98%);
+}
+
+/* Fade-in animation */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-in-up {
+  animation: fadeInUp 0.6s ease-out forwards;
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+.animate-float {
+  animation: float 4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: -1000px 0; }
+  100% { background-position: 1000px 0; }
+}

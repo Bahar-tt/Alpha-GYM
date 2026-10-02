@@ -50,9 +50,33 @@
   }
 
   .input-dark {
-    @apply w-full bg-white/5 border border-gold-500/20 rounded-xl px-4 py-3 text-white
-    placeholder:text-gray-500 focus:outline-none focus:border-gold-500/50 focus:ring-1 focus:ring-gold-500/30
+    @apply w-full bg-white/5 border border-gold-500/20 rounded-xl px-4 py-3 text-white text-sm
+    placeholder:text-xs placeholder:text-gray-500 focus:outline-none focus:border-gold-500/50 focus:ring-1 focus:ring-gold-500/30
     transition-all duration-300;
+    color-scheme: dark;
+  }
+
+  /* ✅ Dropdown/Select: native option list styled to match dark theme */
+  select.input-dark option {
+    background-color: #0f0f0f;
+    color: #e5e5e5;
+    padding: 8px 12px;
+  }
+
+  select.input-dark option:hover,
+  select.input-dark option:focus {
+    background-color: rgba(212, 168, 67, 0.18);
+    color: #f5e0a9;
+  }
+
+  select.input-dark option:checked {
+    background-color: #2a220b;
+    color: #f5c542;
+  }
+
+  select.input-dark:invalid,
+  select.input-dark option:disabled {
+    color: #6b7280;
   }
 
   .stat-card {
@@ -74,8 +98,8 @@
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @keyframes slideInRight {

@@ -1,8 +1,10 @@
 const cron = require('node-cron');
-const Database = require('better-sqlite3');
+const Database = require('../sqlite-wrapper');
 const path = require('path');
+const moment = require('jalali-moment');
 const { todayJalali } = require('../utils/date');
 const { sendBirthday, sendExpiryWarning } = require('./smsService');
+const { generateMembersExcel } = require('./excelExport');
 const DB_PATH = path.join(__dirname, '../gym.db');
 const db = new Database(DB_PATH);
 let started = false;
@@ -21,6 +23,17 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// ✅ تبدیل تاریخ تولد میلادی (YYYY-MM-DD) به ماه/روز شمسی.
+// قبلاً تولد به‌صورت میلادی ذخیره می‌شد ولی با split('/') و مقایسه با
+// ماه/روز شمسی امروز چک می‌شد که هیچ‌وقت تطبیق پیدا نمی‌کرد.
+function birthdayJalaliParts(birthday) {
+  const normalized = String(birthday).replace(/\//g, '-');
+  const gregorian = moment(normalized, 'YYYY-MM-DD');
+  if (!gregorian.isValid()) return null;
+  const [, month, day] = gregorian.locale('fa').format('YYYY/MM/DD').split('/');
+  return { month, day };
+}
+
 /* =========================
    BIRTHDAY CRON
 ========================= */
@@ -37,9 +50,8 @@ async function checkBirthdays() {
   `).all();
 
   const birthdayMembers = members.filter((m) => {
-    const parts = String(m.birthday).split('/');
-    if (parts.length !== 3) return false;
-    return parts[1] === month && parts[2] === day;
+    const parts = birthdayJalaliParts(m.birthday);
+    return parts ? parts.month === month && parts.day === day : false;
   });
 
   if (birthdayMembers.length === 0) {
@@ -80,9 +92,13 @@ async function checkExpiryReminders() {
   });
 
   const placeholders = targetDates.map(() => '?').join(',');
+  // ✅ مدل چندرشته‌ای: نزدیک‌ترین انقضای هر عضو از member_sports
   const members = db.prepare(`
-    SELECT * FROM members
-    WHERE expiry_date IN (${placeholders})
+    SELECT m.id, m.name, m.phone, MIN(ms.expiry_date) AS expiry_date
+    FROM member_sports ms
+    JOIN members m ON m.id = ms.member_id
+    WHERE ms.expiry_date IN (${placeholders})
+    GROUP BY m.id
   `).all(...targetDates);
 
   if (members.length === 0) {
@@ -134,6 +150,19 @@ function startCrons() {
   cron.schedule('0 10 * * *', async () => {
     console.log('[CRON] Expiry reminder running...');
     await checkExpiryReminders();
+  }, {
+    timezone: 'Asia/Tehran',
+  });
+
+  // 🟡 Nightly Excel export of all members - every day 02:00
+  cron.schedule('0 2 * * *', async () => {
+    console.log('[CRON] Nightly Excel export running...');
+    try {
+      const report = generateMembersExcel();
+      console.log(`[CRON] Excel export done: ${report.filename} (${report.count} members)`);
+    } catch (err) {
+      console.error('[CRON] Excel export failed:', err);
+    }
   }, {
     timezone: 'Asia/Tehran',
   });

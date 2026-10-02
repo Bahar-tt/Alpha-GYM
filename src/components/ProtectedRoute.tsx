@@ -1,17 +1,20 @@
 import React from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import type { StaffRole } from '../lib/roles';
 
 interface Props {
   children: React.ReactNode;
   requireAdmin?: boolean;
+  requireRole?: StaffRole[];
 }
 
 export default function ProtectedRoute({
   children,
   requireAdmin = false,
+  requireRole,
 }: Props) {
-  const { user, loading, isAdmin } = useAuth();
+  const { user, loading, isAdmin, role } = useAuth();
 
   if (loading) {
     return (
@@ -25,6 +28,9 @@ export default function ProtectedRoute({
 
   // 🔐 role protection
   if (requireAdmin && !isAdmin) {
+    return <Navigate to="/dashboard" replace />;
+  }
+  if (requireRole && !requireRole.includes(role)) {
     return <Navigate to="/dashboard" replace />;
   }
 

@@ -7,19 +7,32 @@ import {
 } from 'react';
 
 import { isAdminRole, type StaffProfile, type StaffRole } from '../lib/roles';
+import {
+  apiGet,
+  apiPost,
+  apiPut,
+  apiDelete,
+  setToken,
+  getToken,
+  type ApiStaffUser,
+  type ApiFeatures,
+} from '../services/api';
 
 const SESSION_KEY = 'alpha_gym_session';
 const USERS_KEY   = 'alpha_gym_users';
+
+const EMPTY_FEATURES: ApiFeatures = { accounting: false, attendance: false, coach_portal: false, messaging: false };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface ManagedUser {
   id: string;
   username: string;
-  password: string;       // plain-text – demo only, replace with hashed backend
   full_name: string;
   role: StaffRole;
+  is_active: boolean;
   created_at: string;
+  last_login_at?: string | null;
 }
 
 interface StoredSession {
@@ -27,6 +40,7 @@ interface StoredSession {
   username: string;
   full_name: string;
   role: StaffRole;
+  features?: ApiFeatures;
 }
 
 interface AuthContextType {
@@ -35,51 +49,36 @@ interface AuthContextType {
   role: StaffRole;
   isAdmin: boolean;
   loading: boolean;
+  features: ApiFeatures;
+  hasFeature: (key: string) => boolean;
 
   signIn:  (username: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 
   // Admin-only user management
   users:          ManagedUser[];
-  createUser:     (data: Omit<ManagedUser, 'id' | 'created_at'>) => { error: string | null };
-  updateUserRole: (id: string, role: StaffRole)                   => { error: string | null };
-  deleteUser:     (id: string)                                     => { error: string | null };
+  refreshUsers:   () => Promise<void>;
+  createUser:     (data: { username: string; password: string; full_name: string; role: StaffRole }) => Promise<{ error: string | null }>;
+  updateUserRole: (id: string, role: StaffRole)                   => Promise<{ error: string | null }>;
+  updateUserPassword: (id: string, newPassword: string)          => Promise<{ error: string | null }>;
+  updateUser:     (id: string, data: Partial<{ full_name: string; role: StaffRole; is_active: boolean; password: string }>) => Promise<{ error: string | null }>;
+  deleteUser:     (id: string)                                     => Promise<{ error: string | null }>;
+
+  changePassword: (currentPassword: string, newPassword: string) => Promise<{ error: string | null }>;
 }
-
-// ─── Seed ─────────────────────────────────────────────────────────────────────
-
-const SEED_USERS: ManagedUser[] = [
-  {
-    id: '1',
-    username: 'admin',
-    password: 'admin123',
-    full_name: 'مدیر سیستم',
-    role: 'admin',
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: '2',
-    username: 'staff',
-    password: 'staff123',
-    full_name: 'منشی',
-    role: 'staff',
-    created_at: new Date().toISOString(),
-  },
-];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function loadUsers(): ManagedUser[] {
-  try {
-    const raw = localStorage.getItem(USERS_KEY);
-    if (raw) return JSON.parse(raw) as ManagedUser[];
-  } catch { /* ignore */ }
-  localStorage.setItem(USERS_KEY, JSON.stringify(SEED_USERS));
-  return SEED_USERS;
-}
-
-function saveUsers(list: ManagedUser[]) {
-  localStorage.setItem(USERS_KEY, JSON.stringify(list));
+function apiUserToManaged(u: ApiStaffUser): ManagedUser {
+  return {
+    id: u.id,
+    username: u.username,
+    full_name: u.full_name,
+    role: u.role,
+    is_active: u.is_active,
+    created_at: u.created_at,
+    last_login_at: u.last_login_at,
+  };
 }
 
 function sessionToProfile(s: StoredSession): StaffProfile {
@@ -93,108 +92,114 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user,    setUser]    = useState<AuthContextType['user']>(null);
   const [profile, setProfile] = useState<StaffProfile | null>(null);
+  const [features, setFeatures] = useState<ApiFeatures>(EMPTY_FEATURES);
   const [loading, setLoading] = useState(true);
   const [users,   setUsers]   = useState<ManagedUser[]>([]);
 
+  // 🧹 حذف داده‌های احراز هویت قدیمی (localStorage) از نسخه‌های قبلی
   useEffect(() => {
-    setUsers(loadUsers());
+    localStorage.removeItem(USERS_KEY);
+    localStorage.removeItem(SESSION_KEY);
 
-    const raw = localStorage.getItem(SESSION_KEY);
-    if (raw) {
-      try {
-        const s = JSON.parse(raw) as StoredSession;
+    const token = getToken();
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    (async () => {
+      const { data } = await apiGet<{ user: ApiStaffUser }>('/auth/me');
+      if (data?.user) {
+        const s: StoredSession = {
+          id: data.user.id,
+          username: data.user.username,
+          full_name: data.user.full_name,
+          role: data.user.role,
+          features: data.user.features,
+        };
         setUser({ id: s.id, username: s.username });
         setProfile(sessionToProfile(s));
-      } catch {
-        localStorage.removeItem(SESSION_KEY);
+        setFeatures(s.features ?? EMPTY_FEATURES);
+      } else {
+        setToken(null);
       }
-    }
-    setLoading(false);
+      setLoading(false);
+    })();
   }, []);
 
   const signIn = async (username: string, password: string) => {
-    const list  = loadUsers();
-    const match = list.find(
-      (u) =>
-        u.username.toLowerCase() === username.trim().toLowerCase() &&
-        u.password === password,
-    );
-    if (!match) return { error: 'نام کاربری یا رمز عبور اشتباه است' };
-
-    const session: StoredSession = {
-      id: match.id, username: match.username,
-      full_name: match.full_name, role: match.role,
+    const { data, error } = await apiPost<{ token: string; user: ApiStaffUser }>('/auth/login', {
+      username,
+      password,
+    });
+    if (error || !data) return { error };
+    setToken(data.token);
+    const s: StoredSession = {
+      id: data.user.id,
+      username: data.user.username,
+      full_name: data.user.full_name,
+      role: data.user.role,
+      features: data.user.features,
     };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-    setUser({ id: session.id, username: session.username });
-    setProfile(sessionToProfile(session));
+    localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+    setUser({ id: s.id, username: s.username });
+    setProfile(sessionToProfile(s));
+    setFeatures(data.user.features ?? EMPTY_FEATURES);
     return { error: null };
   };
 
   const signOut = async () => {
+    await apiPost('/auth/logout', {}).catch(() => null);
+    setToken(null);
     localStorage.removeItem(SESSION_KEY);
     setUser(null);
     setProfile(null);
+    setFeatures(EMPTY_FEATURES);
   };
 
-  const createUser = (data: Omit<ManagedUser, 'id' | 'created_at'>) => {
-    const list = loadUsers();
-    if (list.some((u) => u.username.toLowerCase() === data.username.trim().toLowerCase())) {
-      return { error: 'این نام کاربری قبلاً ثبت شده است' };
-    }
-    if (!data.username.trim() || !data.password) {
-      return { error: 'نام کاربری و رمز عبور الزامی است' };
-    }
-    const newUser: ManagedUser = {
-      ...data,
-      username:   data.username.trim(),
-      full_name:  data.full_name.trim() || 'کاربر جدید',
-      id:         String(Date.now()),
-      created_at: new Date().toISOString(),
-    };
-    const updated = [...list, newUser];
-    saveUsers(updated);
-    setUsers(updated);
-    return { error: null };
+  const refreshUsers = async () => {
+    const { data } = await apiGet<ApiStaffUser[]>('/users');
+    if (data) setUsers(data.map(apiUserToManaged));
   };
 
-  const updateUserRole = (id: string, role: StaffRole) => {
-    const list   = loadUsers();
-    const admins = list.filter((u) => u.role === 'admin');
-    const target = list.find((u) => u.id === id);
-    if (target?.role === 'admin' && admins.length === 1 && role !== 'admin') {
-      return { error: 'حداقل یک مدیر باید در سیستم وجود داشته باشد' };
-    }
-    const updated = list.map((u) => (u.id === id ? { ...u, role } : u));
-    saveUsers(updated);
-    setUsers(updated);
-
-    if (id === user?.id) {
-      const session = JSON.parse(localStorage.getItem(SESSION_KEY) || '{}') as StoredSession;
-      const next    = { ...session, role };
-      localStorage.setItem(SESSION_KEY, JSON.stringify(next));
-      setProfile(sessionToProfile(next));
-    }
-    return { error: null };
+  const createUser = async (data: { username: string; password: string; full_name: string; role: StaffRole }) => {
+    const { error } = await apiPost('/users', data);
+    if (!error) await refreshUsers();
+    return { error };
   };
 
-  const deleteUser = (id: string) => {
-    const list   = loadUsers();
-    const admins = list.filter((u) => u.role === 'admin');
-    const target = list.find((u) => u.id === id);
-    if (target?.role === 'admin' && admins.length === 1) {
-      return { error: 'نمی‌توان تنها مدیر سیستم را حذف کرد' };
-    }
-    if (id === user?.id) {
-      return { error: 'نمی‌توانید حساب خودتان را حذف کنید' };
-    }
-    const updated = list.filter((u) => u.id !== id);
-    saveUsers(updated);
-    setUsers(updated);
-    return { error: null };
+  const updateUserRole = async (id: string, role: StaffRole) => {
+    const { error } = await apiPut(`/users/${id}`, { role });
+    if (!error) await refreshUsers();
+    return { error };
+  };
+
+  const updateUserPassword = async (id: string, newPassword: string) => {
+    const { error } = await apiPut(`/users/${id}`, { password: newPassword });
+    if (!error) await refreshUsers();
+    return { error };
+  };
+
+  const updateUser = async (id: string, data: Partial<{ full_name: string; role: StaffRole; is_active: boolean; password: string }>) => {
+    const { error } = await apiPut(`/users/${id}`, data);
+    if (!error) await refreshUsers();
+    return { error };
+  };
+
+  const deleteUser = async (id: string) => {
+    const { error } = await apiDelete(`/users/${id}`);
+    if (!error) await refreshUsers();
+    return { error };
+  };
+
+  const changePassword = async (currentPassword: string, newPassword: string) => {
+    return apiPost<{ ok: boolean }>('/auth/change-password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
   };
 
   const role: StaffRole = profile?.role ?? 'staff';
+  const hasFeature = (key: string) => !!features[key as keyof ApiFeatures];
 
   return (
     <AuthContext.Provider
@@ -202,8 +207,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user, profile, role,
         isAdmin: isAdminRole(role),
         loading,
+        features, hasFeature,
         signIn, signOut,
-        users, createUser, updateUserRole, deleteUser,
+        users, refreshUsers, createUser, updateUserRole, updateUserPassword, updateUser, deleteUser,
+        changePassword,
       }}
     >
       {children}

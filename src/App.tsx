@@ -5,11 +5,13 @@ import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Members from './pages/Members';
+import Attendance from './pages/Attendance';
 import Renewals from './pages/Renewals';
 import Messaging from './pages/Messaging';
 import SmsLogs from './pages/SmsLogs';
 import Broadcast from './pages/Broadcast';
 import CoachPortal from './pages/CoachPortal';
+import Accounting from './pages/Accounting';
 import UsersPage from './pages/Users';
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
@@ -43,13 +45,15 @@ function App() {
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard"  element={<Dashboard />} />
             <Route path="members"    element={<Members />} />
-            <Route path="renewals"   element={<Renewals />} />
+            <Route path="attendance" element={<Attendance />} />
             <Route path="messaging"  element={<Messaging />} />
 
             {/* Admin-only routes */}
+            <Route path="renewals"   element={<ProtectedRoute requireAdmin><Renewals /></ProtectedRoute>} />
             <Route path="sms-logs"  element={<ProtectedRoute requireAdmin><SmsLogs /></ProtectedRoute>} />
             <Route path="broadcast" element={<ProtectedRoute requireAdmin><Broadcast /></ProtectedRoute>} />
-            <Route path="coach"     element={<ProtectedRoute requireAdmin><CoachPortal /></ProtectedRoute>} />
+            <Route path="coach"     element={<ProtectedRoute requireRole={['admin', 'coach']}><CoachPortal /></ProtectedRoute>} />
+            <Route path="accounting" element={<ProtectedRoute requireAdmin><Accounting /></ProtectedRoute>} />
             <Route path="users"     element={<ProtectedRoute requireAdmin><UsersPage /></ProtectedRoute>} />
           </Route>
 
