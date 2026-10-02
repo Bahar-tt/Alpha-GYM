@@ -81,6 +81,8 @@ export interface ApiMemberSport {
   member_id: number;
   sport: string;
   sport_plan_key?: string | null;
+  sport_plan_id?: number | null;
+  unit_price?: number | null;
   weekly_sessions: number;
   total_sessions: number;
   used_sessions: number;

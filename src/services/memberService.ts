@@ -5,11 +5,54 @@ export type MembershipType = 'monthly' | 'quarterly' | 'yearly' | 'vip';
 export type FeeBasis = 'session' | 'monthly';
 export type ClassType = 'group' | 'private' | 'personal';
 
+// ✅ پلن شهریه (کاتالوگ — از دیتابیس می‌آید، نه hardcode)
+export interface SportPlan {
+  id: number;
+  sport: string;
+  label: string;
+  sessions: number;
+  price: number;
+  class_type: ClassType;
+  is_active: number;
+  sort_order: number;
+  unit_price: number;
+  default_share_percent: number;
+}
+
+// ✅ گزینه‌های آمادهٔ dropdown در فرم ثبت‌نام
+export interface SportPlanOption {
+  key: string;
+  label: string;
+  sport: string;
+  plan: { label: string; sessions: number; price: number; class_type: ClassType };
+}
+
+/** کاتالوگ پلن‌ها را از سرور می‌گیرد (فقط پلن‌های فعال). */
+export async function getSportPlans(sport?: string): Promise<SportPlan[]> {
+  const qs = sport ? `?sport=${encodeURIComponent(sport)}` : '';
+  const result = await apiGet<SportPlan[]>(`/accounting/sport-plans${qs}`);
+  return result.data || [];
+}
+
+/** کاتالوگ را به شکل گزینه‌های dropdown درمی‌آورد. */
+export function toPlanOptions(plans: SportPlan[]): SportPlanOption[] {
+  return plans
+    .filter((p) => p.is_active)
+    .map((p) => ({
+      key: `${p.sport}::${p.sessions}`,
+      label: `${p.sport} - ${p.label} (${p.price.toLocaleString('fa-IR')} تومان)`,
+      sport: p.sport,
+      plan: { label: p.label, sessions: p.sessions, price: p.price, class_type: p.class_type },
+    }));
+}
+
 // ✅ هر ثبت‌نام ورزشی (اشتراک یک رشته)
 export interface SportEnrollment {
   id: string;
   sport: string;
   sport_plan_key: string;
+  sport_plan_id: number | null;
+  unit_price: number | null;
   weekly_sessions: number;
   total_sessions: number;
   used_sessions: number;
@@ -72,14 +115,22 @@ function todayIso(): string {
 }
 
 function apiSportToRecord(s: ApiMemberSport): SportEnrollment {
+  const total = s.total_sessions ?? 0;
+  const tuition = s.tuition_amount ?? null;
+  // اگر سرور unit_price نداد، از قیمت و تعداد جلسات مشتق کن
+  const unit = s.unit_price != null
+    ? s.unit_price
+    : (tuition != null && tuition > 0 && total > 0 ? Math.round(tuition / total) : null);
   return {
     id: String(s.id),
     sport: s.sport || '',
     sport_plan_key: s.sport_plan_key || '',
+    sport_plan_id: s.sport_plan_id ?? null,
+    unit_price: unit,
     weekly_sessions: s.weekly_sessions ?? 0,
-    total_sessions: s.total_sessions ?? 0,
+    total_sessions: total,
     used_sessions: s.used_sessions ?? 0,
-    tuition_amount: s.tuition_amount ?? null,
+    tuition_amount: tuition,
     fee_basis: (s.fee_basis === 'session' ? 'session' : 'monthly'),
     class_type: (s.class_type === 'private' ? 'private' : s.class_type === 'personal' ? 'personal' : 'group'),
     start_date: s.start_date || '',

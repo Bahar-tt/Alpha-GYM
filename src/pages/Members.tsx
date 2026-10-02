@@ -3,9 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 
 
 import {
-  addMember, deleteMember, getMembers, updateMember,
+  addMember, deleteMember, getMembers, updateMember, getSportPlans, toPlanOptions,
   type MemberFormPayload, type MemberRecord, type MembershipType,
-  type FeeBasis, type ClassType, type SportEnrollment,
+  type FeeBasis, type ClassType, type SportEnrollment, type SportPlan,
 } from '../services/memberService';
 import { getApiErrorMessage } from '../lib/errors';
 import { apiGet, API_BASE } from '../services/api';
@@ -44,38 +44,15 @@ const membershipLabels: Record<MembershipType, string> = {
   monthly: 'ماهانه', quarterly: 'جلسه‌ای', yearly: 'جلسه‌ای خصوصی', vip: 'VIP',
 };
 
-interface SportPlan { label: string; sessions: number; price: number; }
-
-const SPORT_PLANS: Record<string, SportPlan[]> = {
-  'بدنسازی': [
-    { label: '۸ جلسه', sessions: 8, price: 850000 },
-    { label: '۱۲ جلسه', sessions: 12, price: 1000000 },
-    { label: '۱۶ جلسه', sessions: 16, price: 1200000 },
-    { label: '۲۴ جلسه', sessions: 24, price: 1500000 },
-  ],
-  'کراس‌فیت':          [{ label: '۱۲ جلسه', sessions: 12, price: 1200000 }],
-  'فانکشنال فیتنس':    [{ label: '۱۲ جلسه', sessions: 12, price: 800000 }],
-  'فری‌استایل':        [{ label: '۱۲ جلسه', sessions: 12, price: 800000 }],
-  'بادی‌پامپ':         [{ label: '۱۲ جلسه', sessions: 12, price: 1000000 }],
-  'های‌روکس':          [{ label: '۱۲ جلسه', sessions: 12, price: 1000000 }],
-  'اریال':             [{ label: '۱۲ جلسه', sessions: 12, price: 1000000 }],
-  'بوکس':              [{ label: '۱۲ جلسه', sessions: 12, price: 950000 }],
-  'TRX':               [{ label: '۱۲ جلسه', sessions: 12, price: 850000 }],
-  'زومبا':             [{ label: '۱۲ جلسه', sessions: 12, price: 800000 }],
-  'رقص ایرانی':        [{ label: '۱۲ جلسه', sessions: 12, price: 800000 }],
-  'یوگا':              [{ label: '۱۲ جلسه', sessions: 12, price: 800000 }],
-  'ایروفیتنس':         [{ label: '۱۲ جلسه', sessions: 12, price: 800000 }],
-  'پیلاتس':            [{ label: '۱۲ جلسه', sessions: 12, price: 800000 }],
+// نکته: کاتالوگ پلن‌ها از دیتابیس خوانده می‌شود (نه hardcode).
+// پلن‌های اولیه در `backend/server.js` seed شده‌اند و مدیر می‌تواند
+// از بخش حسابداری پلن جدید یا قیمت جدید تعریف کند.
+type SportPlanOptionShape = {
+  key: string;
+  label: string;
+  sport: string;
+  plan: { label: string; sessions: number; price: number };
 };
-
-const SPORT_PLAN_OPTIONS = Object.entries(SPORT_PLANS).flatMap(([sport, plans]) =>
-  plans.map((plan) => ({
-    key: `${sport}::${plan.sessions}`,
-    label: `${sport} - ${plan.label} (${plan.price.toLocaleString('fa-IR')} تومان)`,
-    sport,
-    plan,
-  })),
-);
 
 function formatToman(n: number): string { return n.toLocaleString('fa-IR') + ' تومان'; }
 
@@ -99,10 +76,14 @@ function isValidNationalId(id: string): boolean {
   return check === digits[9];
 }
 
-function findPlanKey(sport: string | null | undefined, sessions: number | null | undefined): string {
+function findPlanKey(
+  options: SportPlanOptionShape[],
+  sport: string | null | undefined,
+  sessions: number | null | undefined,
+): string {
   const s = (sport || '').trim();
   const ss = sessions ?? 0;
-  const opt = SPORT_PLAN_OPTIONS.find((o) => o.sport === s && o.plan.sessions === ss);
+  const opt = options.find((o) => o.sport === s && o.plan.sessions === ss);
   return opt ? opt.key : (s ? 'custom' : '');
 }
 
@@ -150,11 +131,11 @@ function validateForm(form: MemberForm): string | null {
   return null;
 }
 
-function toMemberPayload(form: MemberForm): MemberFormPayload {
+function toMemberPayload(form: MemberForm, options: SportPlanOptionShape[]): MemberFormPayload {
   const start = jalaliToGregorianIso(form.start_date_jalali);
   const activeSports = form.sports.filter((s) => s.key !== '' || s.sport.trim() !== '');
   const sports = activeSports.map((s) => ({
-    sport: (s.key !== 'custom' && s.key ? SPORT_PLAN_OPTIONS.find((o) => o.key === s.key)?.sport : s.sport.trim()) || s.sport.trim(),
+    sport: (s.key !== 'custom' && s.key ? options.find((o) => o.key === s.key)?.sport : s.sport.trim()) || s.sport.trim(),
     sport_plan_key: s.key === 'custom' ? 'custom' : s.key,
     weekly_sessions: s.weekly_sessions,
     total_sessions: s.total_sessions,
@@ -348,6 +329,7 @@ export default function Members() {
     return 'all';
   });
   const [exportMeta, setExportMeta]   = useState<{ updated_at: string } | null>(null);
+  const [planOptions, setPlanOptions] = useState<SportPlanOptionShape[]>([]);
   const [showModal, setShowModal]     = useState(false);
   const [editing, setEditing]         = useState<Member | null>(null);
   const [renewTarget, setRenewTarget] = useState<Member | null>(null);
@@ -356,6 +338,32 @@ export default function Members() {
   const [submitting, setSubmitting]   = useState(false);
 
   useEffect(() => { fetchMembers(); }, []);
+
+  // ✅ کاتالوگ پلن‌ها از سرور (فیچر حسابداری خاموش باشد هم فرم کار کند)
+  useEffect(() => {
+    let active = true;
+    getSportPlans()
+      .then((plans) => {
+        if (active && plans.length) setPlanOptions(toPlanOptions(plans) as SportPlanOptionShape[]);
+      })
+      .catch((e) => console.error('sport plans load error:', e));
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (planOptions.length) return;
+    // بدون کاتالوگ، گزینه‌های عضویتِ موجودش را برگردان تا بتوان ویرایش کرد
+    const fromMembers = members.flatMap((m) =>
+      m.sports.filter((s) => s.total_sessions > 0 && s.tuition_amount).map((s) => ({
+        key: `${s.sport}::${s.total_sessions}`,
+        label: `${s.sport} - ${s.total_sessions} جلسه (${Number(s.tuition_amount).toLocaleString('fa-IR')} تومان)`,
+        sport: s.sport,
+        plan: { label: `${s.total_sessions} جلسه`, sessions: s.total_sessions, price: Number(s.tuition_amount) },
+      })),
+    );
+    const unique = Array.from(new Map(fromMembers.map((o) => [o.key, o])).values());
+    if (unique.length) setPlanOptions(unique);
+  }, [members, planOptions.length]);
 
   useEffect(() => {
     apiGet<{ updated_at: string }>('/members/export/meta').then((r) => {
@@ -418,7 +426,7 @@ export default function Members() {
     const startDate = member.start_date && member.start_date !== '2020-01-01' ? gregorianToJalali(member.start_date) : todayJalali();
     const sports: SportForm[] = (member.sports && member.sports.length > 0
       ? member.sports.map((s: SportEnrollment) => ({
-          key: findPlanKey(s.sport, s.total_sessions),
+          key: findPlanKey(planOptions, s.sport, s.total_sessions),
           sport: s.sport || '',
           weekly_sessions: s.weekly_sessions ?? 0,
           total_sessions: s.total_sessions ?? 0,
@@ -459,7 +467,7 @@ export default function Members() {
       updateSport(index, { key: 'custom', sport: '', tuition_amount: null, total_sessions: 0 });
       return;
     }
-    const opt = SPORT_PLAN_OPTIONS.find((o) => o.key === key);
+    const opt = planOptions.find((o) => o.key === key);
     if (!opt) return;
     updateSport(index, {
       key, sport: opt.sport, tuition_amount: opt.plan.price,
@@ -496,7 +504,7 @@ export default function Members() {
 
     setSubmitting(true);
     try {
-      const payload = toMemberPayload(form);
+      const payload = toMemberPayload(form, planOptions);
       if (editing) { const { error } = await updateMember(editing.id, payload); if (error) throw error; }
       else          { const { error } = await addMember(payload);                if (error) throw error; }
       setShowModal(false); setEditing(null); await fetchMembers();
@@ -747,7 +755,7 @@ export default function Members() {
                         <label className="text-xs text-gray-500 mb-1 block">رشته و پلن</label>
                         <select className="input-dark" value={s.key} onChange={(e) => handleSportPlanChange(i, e.target.value)}>
                           <option value="">انتخاب رشته...</option>
-                          {SPORT_PLAN_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                          {planOptions.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
                           <option value="custom">سایر (سفارشی)</option>
                         </select>
                       </div>

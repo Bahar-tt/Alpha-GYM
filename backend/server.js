@@ -10,6 +10,14 @@ const { sendSMS } = require('./services/smsService');
 const cron = require('node-cron');
 const { startCrons } = require('./services/cronManager');
 const { generateMembersExcel, latestExportPath } = require('./services/excelExport');
+const {
+  DEFAULT_SHARE_PERCENT,
+  isoDate,
+  periodOf,
+  earnFromSession,
+  revokeSessionEarnings,
+  accrueMonthlySalary,
+} = require('./services/coachEarnings');
 
 const PORT = 3001;
 const ENV = process.env.NODE_ENV || 'development';
@@ -405,6 +413,236 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   )
 `);
+
+/* =========================
+   موتور سهم مربی (Coach Earnings Engine)
+   =========================
+   منبع واحد حقیقت برای «بدهی باشگاه به مربی».
+
+   اصول طراحی:
+   ۱) هر سطر = یک سهم مستقل و قابل ردیابی (session / salary / bonus / adjustment)
+   ۲) نرخ و درصد در لحظه اسنپ‌شات می‌شوند تا تغییر بعدیِ تعرفه، سوابق را خراب نکند
+   ۳) UNIQUE(source_type, source_id, coach_id) ⇒ ثبت دوباره یک جلسه، پول اضافه نمی‌سازد
+   ۴) تسویه per-row است تا تسویه جزئی دقیق و قابل ممیزی باشد
+========================= */
+
+// ── کاتالوگ پلن‌های شهریه (پیش‌تر در فرانت‌اند hardcode بود) ──
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sport_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sport TEXT NOT NULL,
+    label TEXT NOT NULL,
+    sessions INTEGER NOT NULL,
+    price INTEGER NOT NULL,
+    class_type TEXT NOT NULL DEFAULT 'group',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  )
+`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_sport_plans_sport ON sport_plans(sport, is_active)`);
+
+// ── سهم‌های محاسبه‌شده مربی ──
+db.exec(`
+  CREATE TABLE IF NOT EXISTS coach_earnings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    coach_id INTEGER NOT NULL,
+    member_id INTEGER,
+    member_name TEXT,
+    sport TEXT,
+    session_id INTEGER,
+    source_type TEXT NOT NULL,
+    source_id INTEGER,
+    period TEXT NOT NULL,
+    earned_at TEXT NOT NULL,
+    unit_price INTEGER NOT NULL DEFAULT 0,
+    share_percent INTEGER NOT NULL DEFAULT 0,
+    share_basis TEXT NOT NULL DEFAULT 'revenue',
+    gross INTEGER NOT NULL DEFAULT 0,
+    net INTEGER NOT NULL DEFAULT 0,
+    note TEXT,
+    settlement_id INTEGER,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(source_type, source_id, coach_id)
+  )
+`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_earnings_coach_period ON coach_earnings(coach_id, period)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_earnings_settlement ON coach_earnings(settlement_id)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_earnings_member ON coach_earnings(member_id)`);
+
+// ── پاداش و کسورات (جریمه، مساعده، پاداش عملکرد) ──
+db.exec(`
+  CREATE TABLE IF NOT EXISTS coach_adjustments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    coach_id INTEGER NOT NULL,
+    period TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    amount INTEGER NOT NULL DEFAULT 0,
+    reason TEXT,
+    created_by TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )
+`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_adjustments_coach_period ON coach_adjustments(coach_id, period)`);
+
+// ── آیتم‌های تسویه: هر تسویه بابت کدام سهم‌ها بود ──
+db.exec(`
+  CREATE TABLE IF NOT EXISTS settlement_items (
+    settlement_id INTEGER NOT NULL,
+    earning_id INTEGER NOT NULL,
+    amount INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (settlement_id, earning_id)
+  )
+`);
+
+// ── سهم پلتفرم/باشگاه از هر جلسه (برای داشبورد سودآوری) ──
+db.exec(`
+  CREATE TABLE IF NOT EXISTS session_revenue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    member_id INTEGER,
+    member_name TEXT,
+    sport TEXT,
+    coach_id INTEGER NOT NULL,
+    unit_price INTEGER NOT NULL DEFAULT 0,
+    gross_revenue INTEGER NOT NULL DEFAULT 0,
+    coach_share INTEGER NOT NULL DEFAULT 0,
+    gym_share INTEGER NOT NULL DEFAULT 0,
+    share_percent INTEGER NOT NULL DEFAULT 0,
+    period TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(session_id)
+  )
+`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_session_revenue_coach ON session_revenue(coach_id, period)`);
+
+// ── ارتقای جدول‌های موجود ──
+
+// اسنپ‌شات نرخ هر جلسه روی member_sports تا تغییر تعرفه، سوابق را خراب نکند
+const msCols = db.prepare(`PRAGMA table_info(member_sports)`).all().map((c) => c.name);
+for (const [col, def] of [
+  ['sport_plan_id',   'INTEGER'],
+  ['unit_price',      'INTEGER'],
+  ['class_type',      'TEXT'],
+]) {
+  if (!msCols.includes(col)) db.exec(`ALTER TABLE member_sports ADD COLUMN ${col} ${def}`);
+}
+
+// سهم مربی هر جلسه (برای بازمحاسبه/اصلاح دستی)
+const csCols = db.prepare(`PRAGMA table_info(coach_sessions)`).all().map((c) => c.name);
+for (const [col, def] of [
+  ['share_percent',     'INTEGER'],
+  ['coach_share_amount','INTEGER'],
+  ['earnings_id',       'INTEGER'],
+  ['sport',             'TEXT'],
+  ['unit_price',        'INTEGER'],
+  ['split_done',        'INTEGER NOT NULL DEFAULT 0'],
+]) {
+  if (!csCols.includes(col)) db.exec(`ALTER TABLE coach_sessions ADD COLUMN ${col} ${def}`);
+}
+
+// نرخ و درصد اختصاصی مربی روی هر رشته (پیش‌فرض: ۵۰٪ از قیمت پلن)
+const cspCols = db.prepare(`PRAGMA table_info(coach_sports)`).all().map((c) => c.name);
+for (const [col, def] of [
+  ['share_percent',        'INTEGER NOT NULL DEFAULT 50'],
+  ['hourly_rate',          'INTEGER'],
+  ['default_share_percent','INTEGER NOT NULL DEFAULT 50'],
+  ['gym_percent',          'INTEGER'],
+]) {
+  if (!cspCols.includes(col)) db.exec(`ALTER TABLE coach_sports ADD COLUMN ${col} ${def}`);
+}
+
+// تقسیم یک جلسه بین چند مربی (مثال: برنامه ترکیبی بدنسازی + TRX)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS coach_session_splits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    coach_id INTEGER NOT NULL,
+    share_percent INTEGER NOT NULL DEFAULT 100,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(session_id, coach_id)
+  )
+`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_splits_session ON coach_session_splits(session_id)`);
+
+// مدل حقوق مربی: share / fixed / hybrid
+const coachCols = db.prepare(`PRAGMA table_info(coaches)`).all().map((c) => c.name);
+for (const [col, def] of [
+  ['pay_model',      "TEXT NOT NULL DEFAULT 'share'"],
+  ['default_share',  'INTEGER NOT NULL DEFAULT 50'],
+  ['monthly_salary', 'INTEGER NOT NULL DEFAULT 0'],
+  ['notes',          'TEXT'],
+]) {
+  if (!coachCols.includes(col)) db.exec(`ALTER TABLE coaches ADD COLUMN ${col} ${def}`);
+}
+
+// جزئیات تسویه
+const settleCols = db.prepare(`PRAGMA table_info(coach_settlements)`).all().map((c) => c.name);
+for (const [col, def] of [
+  ['period_start', 'TEXT'],
+  ['period_end',   'TEXT'],
+  ['gross',        'INTEGER NOT NULL DEFAULT 0'],
+  ['deductions',   'INTEGER NOT NULL DEFAULT 0'],
+  ['net',          'INTEGER NOT NULL DEFAULT 0'],
+  ['item_count',   'INTEGER NOT NULL DEFAULT 0'],
+]) {
+  if (!settleCols.includes(col)) db.exec(`ALTER TABLE coach_settlements ADD COLUMN ${col} ${def}`);
+}
+
+// ── seed کاتالوگ پلن‌ها از مقادیر فعلی فرانت‌اند ──
+const DEFAULT_SPORT_PLANS = [
+  ['بدنسازی', '۸ جلسه', 8, 850000, 'group', 1],
+  ['بدنسازی', '۱۲ جلسه', 12, 1000000, 'personal', 2],
+  ['بدنسازی', '۱۶ جلسه', 16, 1200000, 'personal', 3],
+  ['بدنسازی', '۲۴ جلسه', 24, 1500000, 'personal', 4],
+  ['کراس‌فیت', '۱۲ جلسه', 12, 1200000, 'personal', 5],
+  ['فانکشنال فیتنس', '۱۲ جلسه', 12, 800000, 'group', 6],
+  ['فری‌استایل', '۱۲ جلسه', 12, 800000, 'group', 7],
+  ['بادی‌پامپ', '۱۲ جلسه', 12, 1000000, 'personal', 8],
+  ['های‌روکس', '۱۲ جلسه', 12, 1000000, 'personal', 9],
+  ['اریال', '۱۲ جلسه', 12, 1000000, 'group', 10],
+  ['بوکس', '۱۲ جلسه', 12, 950000, 'personal', 11],
+  ['TRX', '۱۲ جلسه', 12, 850000, 'group', 12],
+  ['زومبا', '۱۲ جلسه', 12, 800000, 'group', 13],
+  ['رقص ایرانی', '۱۲ جلسه', 12, 800000, 'group', 14],
+  ['یوگا', '۱۲ جلسه', 12, 800000, 'group', 15],
+  ['ایروفیتنس', '۱۲ جلسه', 12, 800000, 'group', 16],
+  ['پیلاتس', '۱۲ جلسه', 12, 800000, 'group', 17],
+];
+{
+  const count = db.prepare('SELECT COUNT(*) AS c FROM sport_plans').get().c;
+  if (count === 0) {
+    const ins = db.prepare(
+      'INSERT INTO sport_plans (sport, label, sessions, price, class_type, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
+    );
+    const seedAll = db.transaction(() => {
+      for (const [sport, label, sessions, price, classType, order] of DEFAULT_SPORT_PLANS) {
+        ins.run(sport, label, sessions, price, classType, order);
+      }
+    });
+    seedAll();
+    console.log(`[MIGRATE] sport_plans seeded (${DEFAULT_SPORT_PLANS.length} plans)`);
+  }
+}
+
+// بک‌فیل نرخ هر جلسه برای عضوهایی که unit_price ندارند
+{
+  const need = db.prepare(
+    'SELECT id, tuition_amount, total_sessions FROM member_sports WHERE tuition_amount IS NOT NULL AND tuition_amount > 0 AND total_sessions > 0'
+  ).all();
+  if (need.length) {
+    const upd = db.prepare('UPDATE member_sports SET unit_price = ? WHERE id = ?');
+    const backfill = db.transaction(() => {
+      for (const s of need) {
+        const unit = Math.round(Number(s.tuition_amount) / Number(s.total_sessions));
+        if (unit > 0) upd.run(unit, s.id);
+      }
+    });
+    backfill();
+    console.log(`[MIGRATE] member_sports.unit_price backfilled (${need.length} rows)`);
+  }
+}
 
 // ✅ seed فِلگ‌های ویژگی (پیش‌فرض غیرفعال → فعال‌سازی پولی توسط سرویس‌دهنده)
 const insFlag = db.prepare(`INSERT OR IGNORE INTO feature_flags (key, enabled) VALUES (?, ?)`);
@@ -915,17 +1153,76 @@ function normalizeSportEntry(s) {
   if (!s) return null;
   const sportName = s.sport != null ? String(s.sport).trim() : '';
   if (!sportName) return null;
+  const planKey = s.sport_plan_key ? String(s.sport_plan_key) : null;
+  const resolved = resolvePlan(planKey, sportName, s);
   return {
     sport: sportName,
-    sport_plan_key: s.sport_plan_key ? String(s.sport_plan_key) : null,
+    sport_plan_key: planKey || resolved.plan_key,
+    sport_plan_id: resolved.sport_plan_id,
+    unit_price: resolved.unit_price,
     weekly_sessions: Number(s.weekly_sessions) || 0,
-    total_sessions: Number(s.total_sessions) || 0,
+    total_sessions: Number(s.total_sessions) || resolved.total_sessions,
     used_sessions: Number(s.used_sessions) || 0,
-    tuition_amount: s.tuition_amount != null && s.tuition_amount !== '' ? Number(s.tuition_amount) : null,
+    tuition_amount: s.tuition_amount != null && s.tuition_amount !== '' ? Number(s.tuition_amount) : resolved.tuition_amount,
     fee_basis: s.fee_basis ? String(s.fee_basis).trim() : 'monthly',
-    class_type: s.class_type ? String(s.class_type).trim() : 'group',
+    class_type: s.class_type ? String(s.class_type).trim() : (resolved.class_type || 'group'),
     start_date: s.start_date ? String(s.start_date).trim() : null,
     expiry_date: s.expiry_date ? String(s.expiry_date).trim() : null,
+  };
+}
+
+/**
+ * نرخ هر جلسه را از کاتالوگ پلن‌ها استخراج می‌کند.
+ *
+ * سه مسیر، به‌ترتیب اولویت:
+ *  ۱) کلید پلن «رشته::تعداد_جلسه»  → مستقیم‌ترین و دقیق‌ترین
+ *  ۲) تطابق رشته + تعداد جلسات     → وقتی کلید ارسال نشده
+ *  ۳) قیمت ÷ جلسات از خودِ payload  → وقتی هیچ پلنی در کاتالوگ نیست
+ */
+function resolvePlan(planKey, sportName, s) {
+  const totalSessions = Number(s && s.total_sessions) || 0;
+  const tuition = Number(s && s.tuition_amount) || 0;
+
+  const findBy = (sql, ...params) => {
+    try { return db.prepare(sql).get(...params) || null; } catch { return null; }
+  };
+
+  // ۱) کلید پلن
+  if (planKey && planKey !== 'custom') {
+    const [keySport, keySessions] = String(planKey).split('::');
+    const row = findBy(
+      'SELECT id, sessions, price, class_type FROM sport_plans WHERE sport = ? AND sessions = ? AND is_active = 1 LIMIT 1',
+      keySport || sportName, Number(keySessions) || 0
+    );
+    if (row) return planFrom(row, planKey);
+  }
+
+  // ۲) تطابق رشته و تعداد جلسات
+  if (sportName && totalSessions > 0) {
+    const row = findBy(
+      'SELECT id, sessions, price, class_type FROM sport_plans WHERE sport = ? AND sessions = ? AND is_active = 1 LIMIT 1',
+      sportName, totalSessions
+    );
+    if (row) return planFrom(row, `${sportName}::${row.sessions}`);
+  }
+
+  // ۳) فقط از خودِ payload
+  if (tuition > 0 && totalSessions > 0) {
+    return { sport_plan_id: null, unit_price: Math.round(tuition / totalSessions), total_sessions: totalSessions, tuition_amount: tuition, class_type: null, plan_key: planKey };
+  }
+  return { sport_plan_id: null, unit_price: null, total_sessions: totalSessions, tuition_amount: tuition || null, class_type: null, plan_key: planKey };
+}
+
+function planFrom(row, planKey) {
+  const sessions = Number(row.sessions) || 0;
+  const price = Number(row.price) || 0;
+  return {
+    sport_plan_id: Number(row.id),
+    unit_price: sessions > 0 ? Math.round(price / sessions) : null,
+    total_sessions: sessions,
+    tuition_amount: price || null,
+    class_type: row.class_type || null,
+    plan_key: planKey,
   };
 }
 
@@ -1152,9 +1449,9 @@ app.post('/members', requireAuth, (req, res) => {
 
     const insertSport = db.prepare(`
       INSERT INTO member_sports
-        (member_id, sport, sport_plan_key, weekly_sessions, total_sessions, used_sessions,
-         tuition_amount, fee_basis, class_type, start_date, expiry_date)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (member_id, sport, sport_plan_key, sport_plan_id, unit_price, weekly_sessions, total_sessions,
+         used_sessions, tuition_amount, fee_basis, class_type, start_date, expiry_date)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const createMember = db.transaction(() => {
@@ -1178,6 +1475,8 @@ app.post('/members', requireAuth, (req, res) => {
           memberId,
           e.sport,
           e.sport_plan_key,
+          e.sport_plan_id != null ? Number(e.sport_plan_id) : null,
+          e.unit_price != null ? Number(e.unit_price) : null,
           e.weekly_sessions,
           e.total_sessions,
           e.used_sessions,
@@ -1322,9 +1621,9 @@ app.put('/members/:id', requireAuth, (req, res) => {
       const deleteSports = db.prepare('DELETE FROM member_sports WHERE member_id = ?');
       const insertSport = db.prepare(`
         INSERT INTO member_sports
-          (member_id, sport, sport_plan_key, weekly_sessions, total_sessions, used_sessions,
-           tuition_amount, fee_basis, class_type, start_date, expiry_date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (member_id, sport, sport_plan_key, sport_plan_id, unit_price, weekly_sessions, total_sessions,
+           used_sessions, tuition_amount, fee_basis, class_type, start_date, expiry_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const replaceSports = db.transaction(() => {
         deleteSports.run(id);
@@ -1333,6 +1632,8 @@ app.put('/members/:id', requireAuth, (req, res) => {
             id,
             e.sport,
             e.sport_plan_key,
+            e.sport_plan_id != null ? Number(e.sport_plan_id) : null,
+            e.unit_price != null ? Number(e.unit_price) : null,
             e.weekly_sessions,
             e.total_sessions,
             e.used_sessions,
@@ -2327,6 +2628,20 @@ app.patch('/coach-sessions/:id', requireAuth, requireFeature('coach_portal'), co
     if (updates.length === 0) return res.status(400).json({ error: 'هیچ تغییری ارسال نشده است' });
     params.push(id);
     db.prepare(`UPDATE coach_sessions SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+
+    /* ── موتور سهم مربی ──
+       جلسه که «انجام‌شد» → سهم مربی قطعی می‌شود (idempotent).
+       جلسه که از completed خارج شد → سهمِ تسویه‌نشده برداشته می‌شود.
+       سهم‌های تسویه‌شده دست‌نخورده می‌مانند تا تاریخچه مالی نشکند. */
+    let earnings = null;
+    if (status != null) {
+      if (status === 'completed') {
+        earnings = earnFromSession(db, id);
+      } else if (existing.status === 'completed') {
+        earnings = revokeSessionEarnings(db, id);
+      }
+    }
+
     const row = db.prepare('SELECT * FROM coach_sessions WHERE id = ?').get(id);
     audit(req, 'coach_session.update', {
       entityType: 'coach_session',
@@ -2334,7 +2649,7 @@ app.patch('/coach-sessions/:id', requireAuth, requireFeature('coach_portal'), co
       memberId: existing.member_id,
       detail: req.body || {},
     });
-    res.json(row);
+    res.json({ ...row, earnings });
   } catch (err) {
     console.error('PATCH /coach-sessions/:id', err);
     res.status(500).json({ error: 'Failed to update coach session' });
@@ -2764,6 +3079,169 @@ app.delete('/messages/:id', messagingGuards, (req, res) => {
   } catch (err) {
     console.error('DELETE /messages/:id', err);
     res.status(500).json({ error: 'Failed to delete message' });
+  }
+});
+
+/* =========================
+   موتور سهم مربی — API
+========================= */
+
+// ── کاتالوگ پلن‌های شهریه ──
+
+app.get('/accounting/sport-plans', accountingGuards, (req, res) => {
+  try {
+    const { sport, includeInactive } = req.query || {};
+    const rows = db.prepare(`
+      SELECT id, sport, label, sessions, price, class_type, is_active, sort_order
+      FROM sport_plans
+      ${includeInactive ? '' : 'WHERE is_active = 1'}
+      ${sport ? 'AND sport = ?' : ''}
+      ORDER BY sort_order, sport, sessions
+    `).all(...(sport ? [String(sport)] : []));
+
+    // نرخ هر جلسه + سهم پیش‌فرض مربی برای نمایش در فرم ثبت‌نام
+    res.json(rows.map((p) => ({
+      ...p,
+      unit_price: p.sessions > 0 ? Math.round(p.price / p.sessions) : 0,
+      default_share_percent: DEFAULT_SHARE_PERCENT,
+    })));
+  } catch (err) {
+    console.error('GET /accounting/sport-plans', err);
+    res.status(500).json({ error: 'Failed to list sport plans' });
+  }
+});
+
+app.post('/accounting/sport-plans', accountingGuards, (req, res) => {
+  try {
+    const { sport, label, sessions, price, class_type, is_active } = req.body || {};
+    if (!sport || !String(sport).trim()) return res.status(400).json({ error: 'نام رشته الزامی است' });
+    const sess = Number(sessions) || 0;
+    const amt = Number(price) || 0;
+    if (sess <= 0) return res.status(400).json({ error: 'تعداد جلسات باید بزرگ‌تر از صفر باشد' });
+    if (amt <= 0) return res.status(400).json({ error: 'قیمت باید بزرگ‌تر از صفر باشد' });
+
+    const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM sport_plans').get().m;
+    const info = db.prepare(`
+      INSERT INTO sport_plans (sport, label, sessions, price, class_type, is_active, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      String(sport).trim(),
+      label ? String(label).trim() : `${sess} جلسه`,
+      sess,
+      amt,
+      class_type ? String(class_type) : 'group',
+      is_active === false ? 0 : 1,
+      Number(maxOrder) + 1
+    );
+    audit(req, 'accounting.sport_plan_create', { entityType: 'sport_plan', entityId: info.lastInsertRowid, detail: { sport, sessions: sess, price: amt } });
+    const row = db.prepare('SELECT * FROM sport_plans WHERE id = ?').get(info.lastInsertRowid);
+    res.status(201).json({ ...row, unit_price: Math.round(row.price / row.sessions) });
+  } catch (err) {
+    console.error('POST /accounting/sport-plans', err);
+    res.status(500).json({ error: 'Failed to create sport plan' });
+  }
+});
+
+app.put('/accounting/sport-plans/:id', accountingGuards, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = db.prepare('SELECT * FROM sport_plans WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'پلن پیدا نشد' });
+    const { sport, label, sessions, price, class_type, is_active } = req.body || {};
+    const sess = sessions != null ? Number(sessions) : Number(existing.sessions);
+    const amt = price != null ? Number(price) : Number(existing.price);
+    if (sess <= 0) return res.status(400).json({ error: 'تعداد جلسات باید بزرگ‌تر از صفر باشد' });
+    if (amt <= 0) return res.status(400).json({ error: 'قیمت باید بزرگ‌تر از صفر باشد' });
+    db.prepare(`
+      UPDATE sport_plans SET sport = ?, label = ?, sessions = ?, price = ?, class_type = ?, is_active = ?
+      WHERE id = ?
+    `).run(
+      sport ? String(sport).trim() : existing.sport,
+      label ? String(label).trim() : existing.label,
+      sess,
+      amt,
+      class_type ? String(class_type) : existing.class_type,
+      is_active != null ? (is_active ? 1 : 0) : existing.is_active,
+      id
+    );
+    audit(req, 'accounting.sport_plan_update', {
+      entityType: 'sport_plan', entityId: id,
+      detail: { before: { price: existing.price, sessions: existing.sessions }, after: { price: amt, sessions: sess } },
+    });
+    const row = db.prepare('SELECT * FROM sport_plans WHERE id = ?').get(id);
+    res.json({ ...row, unit_price: Math.round(row.price / row.sessions) });
+  } catch (err) {
+    console.error('PUT /accounting/sport-plans/:id', err);
+    res.status(500).json({ error: 'Failed to update sport plan' });
+  }
+});
+
+// غیرفعال‌سازی نرم (سوابق اعضا دست‌نخورده می‌مانند)
+app.delete('/accounting/sport-plans/:id', accountingGuards, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = db.prepare('SELECT * FROM sport_plans WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'پلن پیدا نشد' });
+    const inUse = db.prepare('SELECT COUNT(*) AS c FROM member_sports WHERE sport_plan_id = ?').get(id).c;
+    if (inUse > 0) {
+      db.prepare('UPDATE sport_plans SET is_active = 0 WHERE id = ?').run(id);
+      audit(req, 'accounting.sport_plan_deactivate', { entityType: 'sport_plan', entityId: id, detail: { members: inUse } });
+      return res.json({ ok: true, deactivated: true, members_using: inUse });
+    }
+    db.prepare('DELETE FROM sport_plans WHERE id = ?').run(id);
+    audit(req, 'accounting.sport_plan_delete', { entityType: 'sport_plan', entityId: id, detail: { sport: existing.sport } });
+    res.json({ ok: true, deleted: true });
+  } catch (err) {
+    console.error('DELETE /accounting/sport-plans/:id', err);
+    res.status(500).json({ error: 'Failed to delete sport plan' });
+  }
+});
+
+// بازسازی سهم‌ها برای یک جلسه (ابزار نگهداری / بازمحاسبه)
+app.post('/accounting/coach-earnings/rebuild', accountingGuards, (req, res) => {
+  try {
+    const { session_id } = req.body || {};
+    const result = session_id
+      ? earnFromSession(db, Number(session_id))
+      : (() => {
+          const ids = db.prepare("SELECT id FROM coach_sessions WHERE status = 'completed'").all();
+          let ok = 0;
+          let skipped = 0;
+          for (const r of ids) {
+            const out = earnFromSession(db, r.id);
+            if (out.ok) ok += 1; else skipped += 1;
+          }
+          return { ok: true, processed: ids.length, earned: ok, skipped };
+        })();
+    audit(req, 'accounting.earnings_rebuild', { entityType: 'coach_earnings', detail: result });
+    res.json(result);
+  } catch (err) {
+    console.error('POST /accounting/coach-earnings/rebuild', err);
+    res.status(500).json({ error: 'Failed to rebuild earnings' });
+  }
+});
+
+// حقوق ثابت ماهانه مربیان
+app.post('/accounting/coaches/:id/accrue-salary', accountingGuards, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const coach = db.prepare('SELECT * FROM coaches WHERE id = ?').get(id);
+    if (!coach) return res.status(404).json({ error: 'مربی پیدا نشد' });
+    const period = String((req.body || {}).period || periodOf(new Date())).slice(0, 7);
+    const amount = (req.body || {}).amount != null ? Number(req.body.amount) : Number(coach.monthly_salary) || 0;
+    const result = accrueMonthlySalary(db, {
+      coachId: id,
+      period,
+      amount,
+      note: (req.body || {}).note,
+      actor: req.staff.full_name,
+    });
+    if (!result.ok) return res.status(400).json({ error: 'حقوق نامعتبر است' });
+    audit(req, 'accounting.salary_accrue', { entityType: 'coach', entityId: id, detail: { period, amount } });
+    res.json(result);
+  } catch (err) {
+    console.error('POST /accounting/coaches/:id/accrue-salary', err);
+    res.status(500).json({ error: 'Failed to accrue salary' });
   }
 });
 
