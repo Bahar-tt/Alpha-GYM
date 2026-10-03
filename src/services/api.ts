@@ -89,6 +89,8 @@ export interface ApiMemberSport {
   tuition_amount?: number | null;
   fee_basis?: string | null;
   class_type?: string | null;
+  coach_id?: number | null;
+  coach_name?: string | null;
   start_date?: string | null;
   expiry_date: string;
 }

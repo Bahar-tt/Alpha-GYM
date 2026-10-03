@@ -46,6 +46,48 @@ export function toPlanOptions(plans: SportPlan[]): SportPlanOption[] {
     }));
 }
 
+// ── مربیان یک رشته ──
+
+export type CoachPayModel = 'share' | 'fixed' | 'hybrid';
+
+export interface SportCoach {
+  id: number;
+  name: string;
+  phone: string | null;
+  national_id: string | null;
+  pay_model: CoachPayModel;
+  default_share: number;
+  monthly_salary: number;
+  can_private: boolean;
+  can_program: boolean;
+  is_active: boolean;
+  share_percent: number;
+  gym_percent: number | null;
+  hourly_rate: number | null;
+  sport: string;
+}
+
+export interface SportCoachesResponse {
+  sport: string;
+  requested: string;
+  coaches: SportCoach[];
+  default_coach_id: number | null;
+  has_private_coaches: boolean;
+}
+
+/**
+ * مربیان یک رشته را می‌گیرد تا در فرم ثبت‌نام:
+ *  • «گروهی»  → اگر فقط یک مربی باشد خودکار انتخاب می‌شود
+ *  • «خصوصی»→ کاربر از بین مربیان مجاز انتخاب می‌کند
+ */
+export async function getCoachesForSport(sport: string): Promise<SportCoachesResponse | null> {
+  if (!sport || !sport.trim()) return null;
+  const result = await apiGet<SportCoachesResponse>(
+    `/accounting/coaches/by-sport?sport=${encodeURIComponent(sport.trim())}`,
+  );
+  return result.data || null;
+}
+
 // ✅ هر ثبت‌نام ورزشی (اشتراک یک رشته)
 export interface SportEnrollment {
   id: string;
@@ -59,6 +101,8 @@ export interface SportEnrollment {
   tuition_amount: number | null;
   fee_basis: FeeBasis;
   class_type: ClassType;
+  coach_id: number | null;
+  coach_name: string | null;
   start_date: string;
   expiry_date: string;
 }
@@ -72,6 +116,7 @@ export interface SportEnrollmentPayload {
   tuition_amount: number | null;
   fee_basis: FeeBasis;
   class_type: ClassType;
+  coach_id?: number | null;
   start_date: string;
   expiry_date: string;
 }
@@ -133,6 +178,8 @@ function apiSportToRecord(s: ApiMemberSport): SportEnrollment {
     tuition_amount: tuition,
     fee_basis: (s.fee_basis === 'session' ? 'session' : 'monthly'),
     class_type: (s.class_type === 'private' ? 'private' : s.class_type === 'personal' ? 'personal' : 'group'),
+    coach_id: s.coach_id ?? null,
+    coach_name: s.coach_name ?? null,
     start_date: s.start_date || '',
     expiry_date: s.expiry_date || '',
   };

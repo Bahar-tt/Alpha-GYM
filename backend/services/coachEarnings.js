@@ -13,6 +13,70 @@
 
 const DEFAULT_SHARE_PERCENT = 50;
 
+// یکسان‌سازی نام رشته: «کراسفیت» و «کراس‌فیت» و «کراس فیت» باید یکی باشند.
+// چون نام رشته‌ها از اکسل مربیان و کاتالوگ پلن‌ها از دو منبع می‌آید.
+function normalizeSportName(name) {
+  if (name == null) return '';
+  return String(name)
+    .replace(/[‌‏‎]/g, '')
+    .replace(/[\s_\-]+/g, '')          // همه فاصله‌ها حذف
+    .replace(/[يى]/g, 'ی')
+    .replace(/[كک]/g, 'ک')
+    .toLowerCase();
+}
+
+/** نام استاندارد رشته را از کاتالوگ پلن‌ها پیدا می‌کند (در صورت وجود). */
+function canonicalSport(db, name) {
+  const raw = String(name || '').trim();
+  if (!raw) return null;
+  const rows = db.prepare('SELECT DISTINCT sport FROM sport_plans').all();
+  const target = normalizeSportName(raw);
+  for (const r of rows) {
+    if (normalizeSportName(r.sport) === target) return r.sport;
+  }
+  return raw;
+}
+
+/** مربیانِ یک رشته (برای نمایش در فرم ثبت‌نام). */
+function coachesForSport(db, sport, { includeInactive = false } = {}) {
+  if (!sport) return [];
+  const target = normalizeSportName(sport);
+  const rows = db.prepare(`
+    SELECT c.id, c.name, c.phone, c.national_id, c.pay_model, c.default_share,
+           c.monthly_salary, c.can_private, c.can_program, c.is_active,
+           cs.share_percent, cs.sport AS coach_sport, cs.gym_percent, cs.hourly_rate
+    FROM coaches c
+    LEFT JOIN coach_sports cs ON cs.coach_id = c.id
+    ${includeInactive ? '' : 'WHERE c.is_active = 1'}
+    ORDER BY c.name
+  `).all();
+
+  const seen = new Set();
+  const out = [];
+  for (const r of rows) {
+    if (normalizeSportName(r.coach_sport) !== target) continue;
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    out.push({
+      id: r.id,
+      name: r.name,
+      phone: r.phone,
+      national_id: r.national_id,
+      pay_model: r.pay_model,
+      default_share: r.default_share,
+      monthly_salary: r.monthly_salary,
+      can_private: !!r.can_private,
+      can_program: !!r.can_program,
+      is_active: !!r.is_active,
+      share_percent: r.share_percent ?? r.default_share,
+      gym_percent: r.gym_percent,
+      hourly_rate: r.hourly_rate,
+      sport: r.coach_sport,
+    });
+  }
+  return out;
+}
+
 // تاریخ‌ها در کل دیتابیس میلادی ISO هستند؛ فقط «دوره» به ماه خلاصه می‌شود.
 function isoDate(d = new Date()) {
   const dt = typeof d === 'string' ? new Date(d) : d;
@@ -354,6 +418,9 @@ function summarizeCoach(db, coachId, from, to) {
 
 module.exports = {
   DEFAULT_SHARE_PERCENT,
+  normalizeSportName,
+  canonicalSport,
+  coachesForSport,
   isoDate,
   isoDateTime,
   periodOf,

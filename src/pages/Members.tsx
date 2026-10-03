@@ -3,9 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 
 
 import {
-  addMember, deleteMember, getMembers, updateMember, getSportPlans, toPlanOptions,
+  addMember, deleteMember, getMembers, updateMember, getSportPlans, toPlanOptions, getCoachesForSport,
   type MemberFormPayload, type MemberRecord, type MembershipType,
-  type FeeBasis, type ClassType, type SportEnrollment, type SportPlan,
+  type FeeBasis, type ClassType, type SportEnrollment, type SportPlan, type SportCoach,
 } from '../services/memberService';
 import { getApiErrorMessage } from '../lib/errors';
 import { apiGet, API_BASE } from '../services/api';
@@ -25,6 +25,7 @@ interface SportForm {
   tuition_amount: number | null;
   fee_basis: FeeBasis;
   class_type: ClassType;
+  coach_id: string;       // مربی این ثبت‌نام (برای گروهی خودکار، برای خصوصی انتخابی)
   end_date_jalali: JalaliDate;
 }
 
@@ -55,6 +56,19 @@ type SportPlanOptionShape = {
 };
 
 function formatToman(n: number): string { return n.toLocaleString('fa-IR') + ' تومان'; }
+
+/**
+ * یکسان‌سازی نام رشته — باید با `normalizeSportName` در بک‌اند یکسان باشد.
+ * «کراسفیت» و «کراس‌فیت» و «کراس فیت» یکی هستند.
+ */
+function normalizeSport(name: string | null | undefined): string {
+  return String(name || '')
+    .replace(/[‌‏‎]/g, '')
+    .replace(/[\s_\-]+/g, '')
+    .replace(/[يى]/g, 'ی')
+    .replace(/[كک]/g, 'ک')
+    .toLowerCase();
+}
 
 const FA_DIGITS = '۰۱۲۳۴۵۶۷۸۹';
 const AR_DIGITS = '٠١٢٣٤٥٦٧٨٩';
@@ -90,7 +104,7 @@ function findPlanKey(
 function makeEmptySport(end: JalaliDate): SportForm {
   return {
     key: '', sport: '', weekly_sessions: 3, total_sessions: 12, used_sessions: 0,
-    tuition_amount: null, fee_basis: 'monthly', class_type: 'group', end_date_jalali: end,
+    tuition_amount: null, fee_basis: 'monthly', class_type: 'group', coach_id: '', end_date_jalali: end,
   };
 }
 
@@ -143,6 +157,7 @@ function toMemberPayload(form: MemberForm, options: SportPlanOptionShape[]): Mem
     tuition_amount: s.tuition_amount,
     fee_basis: s.fee_basis,
     class_type: s.class_type,
+    coach_id: s.coach_id ? Number(s.coach_id) : null,
     start_date: start,
     expiry_date: jalaliToGregorianIso(s.end_date_jalali),
   }));
@@ -318,6 +333,58 @@ function downloadServerExport() {
   a.remove();
 }
 
+/**
+ * انتخابگر مربی برای یک رشته.
+ *
+ * رفتار:
+ *  • فقط یک مربی → خودکار انتخاب و نمایش «انتخاب خودکار»
+ *  • چند مربی    → dropdown انتخاب دستی
+ *  • خصوصی      → فقط مربیانی که مجاز به کلاس خصوصی‌اند
+ */
+function CoachPicker({
+  sport, classType, value, coaches, onChange,
+}: {
+  sport: string;
+  classType: ClassType;
+  value: string;
+  coaches: SportCoach[];
+  onChange: (coachId: string) => void;
+}) {
+  const isPrivate = classType === 'private' || classType === 'personal';
+  const allowed = isPrivate ? coaches.filter((c) => c.can_private) : coaches;
+
+  if (!sport) {
+    return <div className="input-dark flex items-center text-gray-600 text-sm">ابتدا رشته را انتخاب کنید</div>;
+  }
+  if (allowed.length === 0) {
+    return (
+      <div className="input-dark flex items-center text-amber-400/80 text-sm">
+        مربی تعریف نشده
+      </div>
+    );
+  }
+  if (allowed.length === 1) {
+    const only = allowed[0];
+    return (
+      <div className="input-dark flex items-center justify-between gap-2">
+        <span className="text-sm text-white truncate">{only.name}</span>
+        <span className="text-[10px] text-gold-500/80 shrink-0">انتخاب خودکار</span>
+        <input type="hidden" value={value || String(only.id)} readOnly />
+      </div>
+    );
+  }
+  return (
+    <select className="input-dark" value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">— انتخاب مربی —</option>
+      {allowed.map((c) => (
+        <option key={c.id} value={c.id}>
+          {c.name}{c.share_percent ? ` (${c.share_percent}٪)` : ''}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 export default function Members() {
   const [searchParams] = useSearchParams();
   const [members, setMembers]         = useState<Member[]>([]);
@@ -330,6 +397,8 @@ export default function Members() {
   });
   const [exportMeta, setExportMeta]   = useState<{ updated_at: string } | null>(null);
   const [planOptions, setPlanOptions] = useState<SportPlanOptionShape[]>([]);
+  // مربیان به تفکیک رشته (کش سبک تا فرم باز و بسته شود دوباره صدا نزند)
+  const [coachesBySport, setCoachesBySport] = useState<Record<string, SportCoach[]>>({});
   const [showModal, setShowModal]     = useState(false);
   const [editing, setEditing]         = useState<Member | null>(null);
   const [renewTarget, setRenewTarget] = useState<Member | null>(null);
@@ -379,6 +448,44 @@ export default function Members() {
     const sorted = (data || []).sort((a, b) => Number(b.id) - Number(a.id));
     setMembers(sorted);
     setLoading(false);
+  };
+
+  /** مربیان یک رشته را می‌گیرد و در کش می‌گذارد (idempotent). */
+  const ensureCoaches = async (sport: string): Promise<SportCoach[]> => {
+    const key = normalizeSport(sport);
+    if (!key) return [];
+    const cached = coachesBySport[key];
+    if (cached) return cached;
+    const res = await getCoachesForSport(sport);
+    const list = res?.coaches || [];
+    setCoachesBySport((prev) => ({ ...prev, [key]: list }));
+    return list;
+  };
+
+  /**
+   * با تغییر رشته یا نوع کلاس، مربی را همگام می‌کند:
+   *  • گروهی  → اگر رشته فقط یک مربی دارد، خودکار انتخاب می‌شود
+   *  • خصوصی → اگر فقط یک مربیِ مجاز باشد خودکار، وگرنه کاربر انتخاب می‌کند
+   * اگر مربی فعلی دیگر معتبر نباشد، پاک می‌شود.
+   */
+  const syncCoachForSport = async (index: number, sport: string, classType: ClassType) => {
+    const list = await ensureCoaches(sport);
+    const allowed = classType === 'private' || classType === 'personal'
+      ? list.filter((c) => c.can_private)
+      : list;
+
+    setForm((f) => {
+      const sports = f.sports.slice();
+      const cur = sports[index];
+      if (!cur) return f;
+
+      const stillValid = allowed.some((c) => String(c.id) === String(cur.coach_id));
+      if (stillValid) return f;
+
+      const auto = allowed.length === 1 ? String(allowed[0].id) : '';
+      sports[index] = { ...cur, coach_id: auto };
+      return { ...f, sports };
+    });
   };
 
   // ✅ لیست رشته‌ها از آرایه‌ی sports همه‌ی اعضا
@@ -434,6 +541,7 @@ export default function Members() {
           tuition_amount: s.tuition_amount ?? null,
           fee_basis: s.fee_basis ?? 'monthly',
           class_type: s.class_type ?? 'group',
+          coach_id: s.coach_id != null ? String(s.coach_id) : '',
           end_date_jalali: s.expiry_date && s.expiry_date !== '2020-01-01'
             ? gregorianToJalali(s.expiry_date)
             : addJalaliMonths(startDate, 1),
@@ -449,6 +557,8 @@ export default function Members() {
       sports,
     });
     setFormError(''); setShowModal(true);
+    // مربیان رشته‌ها را از پیش بیاور تا dropdown مربی خالی نباشد
+    member.sports?.forEach((s) => { if (s.sport) ensureCoaches(s.sport); });
   };
 
   const updateSport = (index: number, patch: Partial<SportForm>) => {
@@ -458,21 +568,32 @@ export default function Members() {
     });
   };
 
+  /** تغییر نوع کلاس → مربیِ خصوصی/گروهی باید بازبینی شود */
+  const handleClassTypeChange = (index: number, classType: ClassType) => {
+    const cur = form.sports[index];
+    if (!cur) return;
+    updateSport(index, { class_type: classType });
+    syncCoachForSport(index, cur.sport, classType);
+  };
+
   const handleSportPlanChange = (index: number, key: string) => {
     if (!key) {
-      updateSport(index, { key: '', sport: '', tuition_amount: null });
+      updateSport(index, { key: '', sport: '', tuition_amount: null, coach_id: '' });
       return;
     }
     if (key === 'custom') {
-      updateSport(index, { key: 'custom', sport: '', tuition_amount: null, total_sessions: 0 });
+      updateSport(index, { key: 'custom', sport: '', tuition_amount: null, total_sessions: 0, coach_id: '' });
       return;
     }
     const opt = planOptions.find((o) => o.key === key);
     if (!opt) return;
+    const currentClass = form.sports[index]?.class_type || 'group';
     updateSport(index, {
       key, sport: opt.sport, tuition_amount: opt.plan.price,
-      fee_basis: 'session', total_sessions: opt.plan.sessions,
+      fee_basis: 'session', total_sessions: opt.plan.sessions, coach_id: '',
     });
+    // مربی این رشته را بیاور (گروهی → خودکار اگر یکی باشد)
+    syncCoachForSport(index, opt.sport, currentClass);
   };
 
   const addSport = () => {
@@ -793,14 +914,51 @@ export default function Members() {
                           <input type="number" min={0} max={s.total_sessions} className="input-dark" value={s.used_sessions} onChange={(e) => updateSport(i, { used_sessions: Math.max(0, Number(e.target.value) || 0) })} />
                         </div>
                       </div>
-                      <div>
-                        <label className="text-xs text-gray-500 mb-1 block">نوع کلاس</label>
-                        <select className="input-dark" value={s.class_type} onChange={(e) => updateSport(i, { class_type: e.target.value as ClassType })}>
-                          <option value="group">گروهی</option>
-                          <option value="private">خصوصی</option>
-                          <option value="personal">شخصی</option>
-                        </select>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs text-gray-500 mb-1 block">نوع کلاس</label>
+                          <select className="input-dark" value={s.class_type} onChange={(e) => handleClassTypeChange(i, e.target.value as ClassType)}>
+                            <option value="group">گروهی</option>
+                            <option value="private">خصوصی</option>
+                            <option value="personal">شخصی</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-500 mb-1 block">
+                            مربی
+                            {s.class_type === 'group' && <span className="text-gold-500/70"> (خودکار)</span>}
+                          </label>
+                          <CoachPicker
+                            sport={s.sport}
+                            classType={s.class_type}
+                            value={s.coach_id}
+                            coaches={coachesBySport[normalizeSport(s.sport)] || []}
+                            onChange={(coach_id) => updateSport(i, { coach_id })}
+                          />
+                        </div>
                       </div>
+                      {(() => {
+                        const list = coachesBySport[normalizeSport(s.sport)] || [];
+                        const isPrivate = s.class_type === 'private' || s.class_type === 'personal';
+                        const allowed = isPrivate ? list.filter((c) => c.can_private) : list;
+                        if (!s.sport || list.length === 0) {
+                          return (
+                            <p className="text-xs text-amber-400/90">
+                              برای رشته «{s.sport || '—'}» مربی تعریف نشده — از بخش حسابداری مربی اضافه کنید.
+                            </p>
+                          );
+                        }
+                        if (allowed.length === 0) {
+                          return <p className="text-xs text-amber-400/90">هیچ مربی مجاز برای کلاس خصوصی این رشته وجود ندارد.</p>;
+                        }
+                        if (allowed.length === 1 && !s.coach_id) {
+                          return <p className="text-xs text-gold-400">تنها مربی این رشته: {allowed[0].name} (خودکار انتخاب شد)</p>;
+                        }
+                        if (allowed.length > 1 && !s.coach_id) {
+                          return <p className="text-xs text-gray-500">{allowed.length} مربی برای این رشته — یکی را انتخاب کنید.</p>;
+                        }
+                        return null;
+                      })()}
                       <JalaliDatePicker label="تاریخ پایان این رشته" value={s.end_date_jalali} min={form.start_date_jalali} onChange={(end_date_jalali) => updateSport(i, { end_date_jalali })} />
                     </div>
                   ))}

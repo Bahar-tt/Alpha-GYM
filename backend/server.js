@@ -12,6 +12,9 @@ const { startCrons } = require('./services/cronManager');
 const { generateMembersExcel, latestExportPath } = require('./services/excelExport');
 const {
   DEFAULT_SHARE_PERCENT,
+  normalizeSportName,
+  canonicalSport,
+  coachesForSport,
   isoDate,
   periodOf,
   earnFromSession,
@@ -525,6 +528,9 @@ for (const [col, def] of [
   ['sport_plan_id',   'INTEGER'],
   ['unit_price',      'INTEGER'],
   ['class_type',      'TEXT'],
+  // مربیِ این ثبت‌نام: برای کلاس گروهی خودکار پر می‌شود، برای خصوصی انتخابی
+  ['coach_id',        'INTEGER'],
+  ['coach_name',      'TEXT'],
 ]) {
   if (!msCols.includes(col)) db.exec(`ALTER TABLE member_sports ADD COLUMN ${col} ${def}`);
 }
@@ -1128,6 +1134,10 @@ function attachSports(m, sports) {
     ...s,
     fee_basis: s.fee_basis || 'monthly',
     class_type: s.class_type || 'group',
+    // مربیِ این رشته: نام ذخیره‌شده، و اگر نبود از جدول coaches پر می‌شود
+    coach_name: s.coach_name || (s.coach_id
+      ? (db.prepare('SELECT name FROM coaches WHERE id = ?').get(s.coach_id) || {}).name || null
+      : null),
   }));
   const expiries = list.map((s) => s.expiry_date || '').filter(Boolean);
   const starts   = list.map((s) => s.start_date || '').filter(Boolean);
@@ -1155,6 +1165,11 @@ function normalizeSportEntry(s) {
   if (!sportName) return null;
   const planKey = s.sport_plan_key ? String(s.sport_plan_key) : null;
   const resolved = resolvePlan(planKey, sportName, s);
+  const classType = s.class_type ? String(s.class_type).trim() : (resolved.class_type || 'group');
+
+  // مربی این ثبت‌نام: نام استاندارد رشته + مربیِ متناظر
+  const coach = resolveCoach(s, sportName, classType);
+
   return {
     sport: sportName,
     sport_plan_key: planKey || resolved.plan_key,
@@ -1165,10 +1180,49 @@ function normalizeSportEntry(s) {
     used_sessions: Number(s.used_sessions) || 0,
     tuition_amount: s.tuition_amount != null && s.tuition_amount !== '' ? Number(s.tuition_amount) : resolved.tuition_amount,
     fee_basis: s.fee_basis ? String(s.fee_basis).trim() : 'monthly',
-    class_type: s.class_type ? String(s.class_type).trim() : (resolved.class_type || 'group'),
+    class_type: classType,
+    coach_id: coach.coach_id,
+    coach_name: coach.coach_name,
     start_date: s.start_date ? String(s.start_date).trim() : null,
     expiry_date: s.expiry_date ? String(s.expiry_date).trim() : null,
   };
+}
+
+/**
+ * مربیِ یک ثبت‌نام را مشخص می‌کند.
+ *
+ * رفتار مورد انتظار در فرم ثبت‌نام:
+ *  • کلاس گروهی  → مربیِ فعالِ آن رشته (اگر فقط یکی باشد) به‌صورت خودکار
+ *  • کلاس خصوصی → مربی را کاربر انتخاب می‌کند، ولی اگر انتخاب نکرد
+ *                  و فقط یک مربی مجاز باشد، همان هم به‌صورت خودکار
+ *
+ * اگر چند مربی برای رشته باشد و کاربر انتخابی نکرد، coach_id خالی می‌ماند تا
+ * مدیر بعداً تخصیص بدهد (و گزارش‌ها آن را در «تخصیص‌نشده» نشان دهند).
+ */
+function resolveCoach(s, sportName, classType) {
+  const explicit = s.coach_id != null && s.coach_id !== '' ? Number(s.coach_id) : null;
+
+  if (explicit) {
+    const row = db.prepare('SELECT id, name, can_private FROM coaches WHERE id = ? AND is_active = 1').get(explicit);
+    if (row) {
+      return { coach_id: row.id, coach_name: row.name };
+    }
+  }
+
+  // نام استاندارد رشته (کراسفیت → کراس‌فیت)
+  const canonical = canonicalSport(db, sportName);
+  const candidates = coachesForSport(db, canonical);
+  if (candidates.length === 0) return { coach_id: null, coach_name: null };
+
+  if (classType === 'personal' || classType === 'private') {
+    const allowed = candidates.filter((c) => c.can_private);
+    if (allowed.length === 1) return { coach_id: allowed[0].id, coach_name: allowed[0].name };
+    return { coach_id: null, coach_name: null };
+  }
+
+  // گروهی: اگر فقط یک مربی، خودکار انتخاب شود
+  if (candidates.length === 1) return { coach_id: candidates[0].id, coach_name: candidates[0].name };
+  return { coach_id: null, coach_name: null };
 }
 
 /**
@@ -1450,8 +1504,8 @@ app.post('/members', requireAuth, (req, res) => {
     const insertSport = db.prepare(`
       INSERT INTO member_sports
         (member_id, sport, sport_plan_key, sport_plan_id, unit_price, weekly_sessions, total_sessions,
-         used_sessions, tuition_amount, fee_basis, class_type, start_date, expiry_date)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         used_sessions, tuition_amount, fee_basis, class_type, coach_id, coach_name, start_date, expiry_date)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const createMember = db.transaction(() => {
@@ -1483,6 +1537,8 @@ app.post('/members', requireAuth, (req, res) => {
           e.tuition_amount,
           e.fee_basis,
           e.class_type,
+          e.coach_id != null ? Number(e.coach_id) : null,
+          e.coach_name,
           e.start_date || start_date || null,
           e.expiry_date || expiry_date || null
         );
@@ -1622,8 +1678,8 @@ app.put('/members/:id', requireAuth, (req, res) => {
       const insertSport = db.prepare(`
         INSERT INTO member_sports
           (member_id, sport, sport_plan_key, sport_plan_id, unit_price, weekly_sessions, total_sessions,
-           used_sessions, tuition_amount, fee_basis, class_type, start_date, expiry_date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           used_sessions, tuition_amount, fee_basis, class_type, coach_id, coach_name, start_date, expiry_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const replaceSports = db.transaction(() => {
         deleteSports.run(id);
@@ -1640,6 +1696,8 @@ app.put('/members/:id', requireAuth, (req, res) => {
             e.tuition_amount,
             e.fee_basis,
             e.class_type,
+            e.coach_id != null ? Number(e.coach_id) : null,
+            e.coach_name,
             e.start_date || start_date || existing.start_date,
             e.expiry_date || expiry_date || existing.expiry_date
           );
@@ -3085,6 +3143,27 @@ app.delete('/messages/:id', messagingGuards, (req, res) => {
 /* =========================
    موتور سهم مربی — API
 ========================= */
+
+// ── مربیان یک رشته (برای فرم ثبت‌نام: گروهی → خودکار، خصوصی → انتخابی) ──
+app.get('/accounting/coaches/by-sport', accountingGuards, (req, res) => {
+  try {
+    const sport = String((req.query || {}).sport || '').trim();
+    if (!sport) return res.status(400).json({ error: 'نام رشته الزامی است' });
+    const canonical = canonicalSport(db, sport);
+    const list = coachesForSport(db, canonical);
+    res.json({
+      sport: canonical,
+      requested: sport,
+      coaches: list,
+      // برای فرم ثبت‌نام: اگر گروهی انتخاب شود و فقط یک مربی باشد، همان را پیش‌فرض می‌گذاریم
+      default_coach_id: list.length === 1 ? list[0].id : null,
+      has_private_coaches: list.some((c) => c.can_private),
+    });
+  } catch (err) {
+    console.error('GET /accounting/coaches/by-sport', err);
+    res.status(500).json({ error: 'Failed to list coaches for sport' });
+  }
+});
 
 // ── کاتالوگ پلن‌های شهریه ──
 
