@@ -72,7 +72,7 @@ export default function CoachPortal() {
     notes: '',
   });
   const [submitting, setSubmitting] = useState(false);
-  const [activeView, setActiveView] = useState<'sessions' | 'members' | 'programs' | 'plans'>('sessions');
+  const [activeView, setActiveView] = useState<'sessions' | 'members' | 'ftm' | 'programs' | 'plans'>('sessions');
   const [error, setError] = useState('');
 
   const [programs, setPrograms] = useState<WorkoutProgram[]>([]);
@@ -377,7 +377,7 @@ export default function CoachPortal() {
 
       {/* View toggle */}
       <div className="flex items-center gap-2 flex-wrap">
-        {(['sessions', 'members', 'programs'] as const).map((view) => (
+        {(['sessions', 'members', 'ftm', 'programs'] as const).map((view) => (
           <button
             key={view}
             onClick={() => setActiveView(view)}
@@ -387,7 +387,10 @@ export default function CoachPortal() {
                 : 'text-gray-400 hover:text-gray-300 bg-white/5'
             }`}
           >
-            {view === 'sessions' ? 'جلسات' : view === 'members' ? 'اعضا' : 'برنامه تمرینی'}
+            {view === 'sessions' ? 'جلسات'
+              : view === 'members' ? 'اعضا'
+              : view === 'ftm' ? 'ارزیابی ورزشکار'
+              : 'برنامه تمرینی'}
           </button>
         ))}
         {isAdmin && (
@@ -456,6 +459,9 @@ export default function CoachPortal() {
             )}
           </div>
         </div>
+      ) : activeView === 'ftm' ? (
+        /* FTM-7 ارزیابی اولیه ورزشکار */
+        <FtmPanel />
       ) : activeView === 'members' ? (
         /* Members view */
         <div className="glass-card overflow-hidden">

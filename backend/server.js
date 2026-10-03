@@ -357,9 +357,79 @@ db.exec(`
 `);
 
 /* =========================
-   پیام‌رسانی هوشمند
+   فرم ارزیابی اولیه ورزشکار (FTM-7)
+   =========================
+   فرم استاندارد ارزیابی بدنسازی که مربی هنگام ثبت عضو پر می‌کند.
+   شامل: مشخصات فردی، سابقه ورزشی، سطح، محل تمرین، هدف،
+   سوابق پزشکی، عکس از ۳ زاویه، و اندازه‌های بدن.
 ========================= */
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ftm_assessments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    member_id INTEGER NOT NULL,
+    coach_id INTEGER,
+    coach_name TEXT,
+
+    // ── مشخصات فردی ──
+    age INTEGER,
+    height_cm INTEGER,
+    weight_kg REAL,
+
+    // ── سابقه ورزشی ──
+    bodybuilding_years REAL,
+    last_program_date TEXT,
+    days_per_week INTEGER,
+
+    // ── سطح ورزشکار ──
+    level TEXT,               -- beginner | semi_pro | pro
+    training_place TEXT,      -- full_gym | limited_gym | home
+    home_equipment TEXT,
+
+    // ── هدف (چندگزینه‌ای، JSON آرایه) ──
+    goals TEXT,
+
+    // ── سوابق پزشکی ──
+    injuries TEXT,            -- JSON آرایه: knee | shoulder | back | ankle | other
+    injury_other TEXT,
+    current_pain TEXT,
+    doctor_restrictions TEXT,
+
+    // ── عکس از ۳ زاویه (بدون صورت) ──
+    photo_back TEXT,
+    photo_front TEXT,
+    photo_side TEXT,
+
+    // ── اندازه‌ها ──
+    measured_at TEXT,
+    m_weight REAL,
+    m_chest REAL,
+    m_arm REAL,
+    m_waist REAL,
+    m_abdomen REAL,
+    m_glutes REAL,
+    m_thigh REAL,
+
+    // ── وضعیت و یادداشت ──
+    notes TEXT,
+    status TEXT NOT NULL DEFAULT 'draft',   -- draft | final
+    created_by TEXT,
+    updated_by TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )
+`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_ftm_member ON ftm_assessments(member_id)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_ftm_coach ON ftm_assessments(coach_id)`);
+// فقط یک فرم فعال برای هر عضو
+db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_ftm_one_active_per_member
+  ON ftm_assessments(member_id) WHERE status != 'archived'
+`);
+
+/* =========================
+   پیام‌رسانی هوشمند
+========================= */
 db.exec(`
   CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3911,6 +3981,236 @@ app.post('/accounting/coaches/:id/accrue-salary', accountingGuards, (req, res) =
   } catch (err) {
     console.error('POST /accounting/coaches/:id/accrue-salary', err);
     res.status(500).json({ error: 'Failed to accrue salary' });
+  }
+});
+
+/* =========================
+   فرم ارزیابی اولیه ورزشکار (FTM-7) — API
+========================= */
+
+const FTM_LEVELS = ['beginner', 'semi_pro', 'pro'];
+const FTM_PLACES = ['full_gym', 'limited_gym', 'home'];
+const FTM_INJURIES = ['knee', 'shoulder', 'back', 'ankle', 'other'];
+const FTM_GOALS = [
+  'strength', 'vertical_jump', 'speed_agility', 'muscle_size',
+  'fat_loss', 'injury_prevention', 'muscular_endurance',
+];
+
+function ftmJsonList(v) {
+  if (v == null) return [];
+  if (Array.isArray(v)) return v.map(String);
+  const s = String(v).trim();
+  if (!s) return [];
+  try {
+    const parsed = JSON.parse(s);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return s.split(',').map((x) => x.trim()).filter(Boolean);
+  }
+}
+
+function numOrNull(v) {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** نرمال‌سازی ورودی فرم FTM */
+function normalizeFtm(body = {}) {
+  const level = FTM_LEVELS.includes(body.level) ? body.level : null;
+  const place = FTM_PLACES.includes(body.training_place) ? body.training_place : null;
+  const goals = ftmJsonList(body.goals).filter((g) => FTM_GOALS.includes(g));
+  const injuries = ftmJsonList(body.injuries).filter((i) => FTM_INJURIES.includes(i));
+
+  const str = (v, max = 500) => (v == null || v === '' ? null : String(v).trim().slice(0, max));
+  const dbl = (v) => {
+    const n = numOrNull(v);
+    return n == null ? null : Math.round(n * 100) / 100;
+  };
+
+  return {
+    age: numOrNull(body.age),
+    height_cm: numOrNull(body.height_cm),
+    weight_kg: dbl(body.weight_kg),
+
+    bodybuilding_years: dbl(body.bodybuilding_years),
+    last_program_date: str(body.last_program_date, 20),
+    days_per_week: numOrNull(body.days_per_week),
+
+    level,
+    training_place: place,
+    home_equipment: str(body.home_equipment),
+
+    goals: JSON.stringify(goals),
+    injuries: JSON.stringify(injuries),
+    injury_other: str(body.injury_other, 200),
+    current_pain: str(body.current_pain, 500),
+    doctor_restrictions: str(body.doctor_restrictions, 500),
+
+    photo_back: str(body.photo_back, 500),
+    photo_front: str(body.photo_front, 500),
+    photo_side: str(body.photo_side, 500),
+
+    measured_at: str(body.measured_at, 20),
+    m_weight: dbl(body.m_weight),
+    m_chest: dbl(body.m_chest),
+    m_arm: dbl(body.m_arm),
+    m_waist: dbl(body.m_waist),
+    m_abdomen: dbl(body.m_abdomen),
+    m_glutes: dbl(body.m_glutes),
+    m_thigh: dbl(body.m_thigh),
+
+    notes: str(body.notes, 1000),
+    status: body.status === 'final' ? 'final' : 'draft',
+  };
+}
+
+const FTM_COLUMNS = [
+  'age', 'height_cm', 'weight_kg',
+  'bodybuilding_years', 'last_program_date', 'days_per_week',
+  'level', 'training_place', 'home_equipment',
+  'goals', 'injuries', 'injury_other', 'current_pain', 'doctor_restrictions',
+  'photo_back', 'photo_front', 'photo_side',
+  'measured_at', 'm_weight', 'm_chest', 'm_arm', 'm_waist', 'm_abdomen', 'm_glutes', 'm_thigh',
+  'notes', 'status',
+];
+
+function ftmRow(id) {
+  const row = db.prepare('SELECT * FROM ftm_assessments WHERE id = ?').get(Number(id));
+  if (!row) return null;
+  const member = db.prepare('SELECT id, name, phone, member_code FROM members WHERE id = ?').get(row.member_id);
+  return {
+    ...row,
+    goals: ftmJsonList(row.goals),
+    injuries: ftmJsonList(row.injuries),
+    member_name: member ? member.name : null,
+    member_phone: member ? member.phone : null,
+    member_code: member ? member.member_code : null,
+  };
+}
+
+const ftmGuards = [requireAuth, requireFeature('coach_portal'), coachAccess];
+
+// فهرست فرم‌های یک عضو
+app.get('/ftm/members/:memberId', ftmGuards, (req, res) => {
+  try {
+    const memberId = Number(req.params.memberId);
+    const member = db.prepare('SELECT id, name, phone FROM members WHERE id = ?').get(memberId);
+    if (!member) return res.status(404).json({ error: 'عضو پیدا نشد' });
+
+    // مربی فقط فرم‌های خودش را می‌بیند؛ مدیر همه را
+    const isAdmin = req.staff.role === 'admin';
+    const staffCoachId = staffToCoachId(db, req.staff);
+    let rows;
+    if (isAdmin || staffCoachId == null) {
+      rows = db.prepare('SELECT id FROM ftm_assessments WHERE member_id = ? ORDER BY created_at DESC').all(memberId);
+    } else {
+      rows = db.prepare(
+        'SELECT id FROM ftm_assessments WHERE member_id = ? AND coach_id = ? ORDER BY created_at DESC'
+      ).all(memberId, staffCoachId);
+    }
+    res.json({ member, assessments: rows.map((r) => ftmRow(r.id)) });
+  } catch (err) {
+    console.error('GET /ftm/members/:memberId', err);
+    res.status(500).json({ error: 'Failed to load FTM assessments' });
+  }
+});
+
+// یک فرم مشخص
+app.get('/ftm/:id', ftmGuards, (req, res) => {
+  try {
+    const row = ftmRow(req.params.id);
+    if (!row) return res.status(404).json({ error: 'فرم پیدا نشد' });
+    res.json(row);
+  } catch (err) {
+    console.error('GET /ftm/:id', err);
+    res.status(500).json({ error: 'Failed to load FTM form' });
+  }
+});
+
+// ثبت فرم جدید (یا ویرایش فرام پیش‌نویس همان عضو)
+app.post('/ftm', ftmGuards, (req, res) => {
+  try {
+    const body = req.body || {};
+    const memberId = Number(body.member_id);
+    if (!memberId) return res.status(400).json({ error: 'انتخاب عضو الزامی است' });
+    const member = db.prepare('SELECT id, name FROM members WHERE id = ?').get(memberId);
+    if (!member) return res.status(404).json({ error: 'عضو پیدا نشد' });
+
+    // مربیِ فرم: صریح، وگرنه کاربر پنل فعلی، وگرنه مدیر
+    let coachId = body.coach_id != null && body.coach_id !== '' ? Number(body.coach_id) : null;
+    let coachName = null;
+    if (coachId) {
+      const c = db.prepare('SELECT id, name FROM coaches WHERE id = ?').get(coachId);
+      if (c) coachName = c.name;
+    } else {
+      const mapped = staffToCoachId(db, req.staff);
+      if (mapped) {
+        coachId = mapped;
+        coachName = (db.prepare('SELECT name FROM coaches WHERE id = ?').get(mapped) || {}).name || null;
+      }
+    }
+    if (!coachId && req.staff.role === 'admin') {
+      coachName = coachName || req.staff.full_name;
+    }
+
+    const d = normalizeFtm(body);
+
+    // اگر پیش‌نویس فعالی برای این عضو هست، همان به‌روزرسانی شود
+    const existingDraft = db.prepare(
+      "SELECT id FROM ftm_assessments WHERE member_id = ? AND status = 'draft' LIMIT 1"
+    ).get(memberId);
+
+    if (existingDraft) {
+      const sets = ['coach_id = ?', 'coach_name = ?', ...FTM_COLUMNS.map((c) => `${c} = ?`),
+        "updated_at = datetime('now')", 'updated_by = ?'];
+      const params = [coachId, coachName, ...FTM_COLUMNS.map((c) => d[c]), req.staff.full_name];
+      db.prepare(`UPDATE ftm_assessments SET ${sets.join(', ')} WHERE id = ?`).run(...params, existingDraft.id);
+      audit(req, 'ftm.update', { entityType: 'ftm', entityId: existingDraft.id, memberId, detail: { status: d.status } });
+      return res.json(ftmRow(existingDraft.id));
+    }
+
+    const cols = ['member_id', 'coach_id', 'coach_name', ...FTM_COLUMNS, 'created_by', 'updated_by'];
+    const vals = [memberId, coachId, coachName, ...FTM_COLUMNS.map((c) => d[c]), req.staff.full_name, req.staff.full_name];
+    const info = db.prepare(
+      `INSERT INTO ftm_assessments (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`
+    ).run(...vals);
+    audit(req, 'ftm.create', { entityType: 'ftm', entityId: info.lastInsertRowid, memberId, detail: { status: d.status } });
+    res.status(201).json(ftmRow(info.lastInsertRowid));
+  } catch (err) {
+    console.error('POST /ftm', err);
+    res.status(500).json({ error: 'Failed to save FTM form' });
+  }
+});
+
+// نهایی کردن فرم
+app.post('/ftm/:id/finalize', ftmGuards, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = db.prepare('SELECT * FROM ftm_assessments WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'فرم پیدا نشد' });
+    db.prepare("UPDATE ftm_assessments SET status = 'final', updated_at = datetime('now'), updated_by = ? WHERE id = ?")
+      .run(req.staff.full_name, id);
+    audit(req, 'ftm.finalize', { entityType: 'ftm', entityId: id, memberId: existing.member_id });
+    res.json(ftmRow(id));
+  } catch (err) {
+    console.error('POST /ftm/:id/finalize', err);
+    res.status(500).json({ error: 'Failed to finalize FTM form' });
+  }
+});
+
+// بایگانی (فرم قبلی)
+app.delete('/ftm/:id', ftmGuards, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = db.prepare('SELECT * FROM ftm_assessments WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'فرم پیدا نشد' });
+    db.prepare("UPDATE ftm_assessments SET status = 'archived', updated_at = datetime('now') WHERE id = ?").run(id);
+    audit(req, 'ftm.archive', { entityType: 'ftm', entityId: id, memberId: existing.member_id });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /ftm/:id', err);
+    res.status(500).json({ error: 'Failed to archive FTM form' });
   }
 });
 
