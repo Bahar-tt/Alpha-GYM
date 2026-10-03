@@ -20,6 +20,19 @@ const {
   earnFromSession,
   revokeSessionEarnings,
   accrueMonthlySalary,
+  summarizeCoach,
+  setSessionSplits,
+  getSessionSplits,
+  addAdjustment,
+  deleteAdjustment,
+  listAdjustments,
+  settleCoach,
+  settlementDetail,
+  cancelSettlement,
+  coachProfitability,
+  sportProfitability,
+  forecastMonth,
+  planUtilization,
 } = require('./services/coachEarnings');
 
 const PORT = 3001;
@@ -521,6 +534,49 @@ db.exec(`
 db.exec(`CREATE INDEX IF NOT EXISTS idx_session_revenue_coach ON session_revenue(coach_id, period)`);
 
 // ── ارتقای جدول‌های موجود ──
+
+/**
+ * coach_sessions.coach_id در نسخهٔ اولیه NOT NULL بود، اما در طراحی جدید
+ * «مربی از طریق جلسه مشخص می‌شود» یعنی ممکن است هنوز تخصیص نخورده باشد.
+ * SQLite قابلیت حذف NOT NULL ندارد، پس جدول بازسازی می‌شود.
+ * این مهاجرت idempotent است (فقط در صورت نیاز اجرا می‌شود).
+ */
+(() => {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(coach_sessions)`).all();
+    const coachCol = cols.find((c) => c.name === 'coach_id');
+    if (coachCol && coachCol.notnull === 1) {
+      const tmp = 'coach_sessions_migrate_tmp';
+      db.exec('PRAGMA foreign_keys = OFF');
+      db.exec(`ALTER TABLE coach_sessions RENAME TO ${tmp}`);
+      db.exec(`
+        CREATE TABLE coach_sessions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          coach_id INTEGER,
+          coach_name TEXT,
+          member_id INTEGER NOT NULL,
+          session_date TEXT NOT NULL,
+          session_time TEXT NOT NULL,
+          duration_minutes INTEGER NOT NULL DEFAULT 60,
+          session_type TEXT NOT NULL DEFAULT 'personal',
+          status TEXT NOT NULL DEFAULT 'scheduled',
+          notes TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        )
+      `);
+      const oldCols = db.prepare(`PRAGMA table_info(${tmp})`).all().map((c) => c.name);
+      const newCols = db.prepare(`PRAGMA table_info(coach_sessions)`).all().map((c) => c.name);
+      const shared = oldCols.filter((c) => newCols.includes(c));
+      db.exec(`INSERT INTO coach_sessions (${shared.join(', ')}) SELECT ${shared.join(', ')} FROM ${tmp}`);
+      db.exec(`DROP TABLE ${tmp}`);
+      db.exec('PRAGMA foreign_keys = ON');
+      // ستون‌های افزوده‌شدهٔ فازهای بعدی دوباره ساخته می‌شوند
+      console.log('[MIGRATE] coach_sessions.coach_id is now nullable');
+    }
+  } catch (err) {
+    console.error('[MIGRATE] coach_sessions nullable failed:', err.message);
+  }
+})();
 
 // اسنپ‌شات نرخ هر جلسه روی member_sports تا تغییر تعرفه، سوابق را خراب نکند
 const msCols = db.prepare(`PRAGMA table_info(member_sports)`).all().map((c) => c.name);
@@ -2101,12 +2157,21 @@ function sendCsv(res, filename, headers, rows) {
     const s = v == null ? '' : String(v);
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
-  const csv = '\uFEFF' + [
-    headers.map(esc).join(','),
-    ...rows.map((r) => r.map(esc).join(',')),
-  ].join('\r\n');
+  const lines = [
+    ...(headers ? [headers.map(esc).join(',')] : []),
+    ...rows.map((r) => (Array.isArray(r) ? r.map(esc).join(',') : esc(r))),
+  ];
+  const csv = '\uFEFF' + lines.join('\r\n');
+  // ⚠️ هدر HTTP فقط ASCII می‌پذیرد؛ نام فارسی باید به filename* منتقل شود
+  const asciiName = String(filename)
+    .replace(/[^\x20-\x7E]/g, '_')
+    .replace(/["\\]/g, '_');
+  const utf8Name = encodeURIComponent(String(filename));
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename="${asciiName}"; filename*=UTF-8''${utf8Name}`
+  );
   res.send(csv);
 }
 
@@ -2257,19 +2322,59 @@ app.get('/accounting/coaches', accountingGuards, (_req, res) => {
 
 app.post('/accounting/coaches', accountingGuards, (req, res) => {
   try {
-    const { name, phone, is_active, sports } = req.body || {};
+    const {
+      name, phone, is_active, sports,
+      national_id, pay_model, default_share, monthly_salary,
+      can_private, can_program, notes,
+    } = req.body || {};
     if (!name || !String(name).trim()) {
       return res.status(400).json({ error: 'نام مربی الزامی است' });
     }
+    // ⚠️ پیش‌فرض باید «فعال» باشد؛ ارسال نشدن is_active یعنی فعال
+    const activeFlag = is_active === false || is_active === 0 ? 0 : 1;
+    const model = ['share', 'fixed', 'hybrid'].includes(pay_model) ? pay_model : 'share';
+    const sharePct = Number(default_share) > 0 ? Math.min(Number(default_share), 100) : DEFAULT_SHARE_PERCENT;
+    const salary = Number(monthly_salary) || 0;
+    if ((model === 'fixed' || model === 'hybrid') && salary <= 0) {
+      return res.status(400).json({ error: 'برای مدل حقوق ثابت، مبلغ حقوق الزامی است' });
+    }
+
     const insert = db.transaction(() => {
-      const r = db.prepare('INSERT INTO coaches (name, phone, is_active) VALUES (?, ?, ?)')
-        .run(String(name).trim(), phone ? String(phone).trim() : null, is_active ? 1 : 0);
-      const id = r.lastInsertRowid;
+      const r = db.prepare(`
+        INSERT INTO coaches
+          (name, phone, national_id, is_active, pay_model, default_share, monthly_salary,
+           can_private, can_program, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        String(name).trim(),
+        phone ? String(phone).trim() : null,
+        national_id ? String(national_id).trim() : null,
+        activeFlag,
+        model,
+        sharePct,
+        salary,
+        can_private === false ? 0 : 1,
+        can_program ? 1 : 0,
+        notes ? String(notes).trim() : null
+      );
+      const id = Number(r.lastInsertRowid);
       if (Array.isArray(sports)) {
         for (const s of sports) {
           if (s && s.sport && String(s.sport).trim()) {
-            db.prepare('INSERT INTO coach_sports (coach_id, sport, commission_percent, commission_amount) VALUES (?, ?, ?, ?)')
-              .run(id, String(s.sport).trim(), Number(s.commission_percent) || 0, s.commission_amount != null && s.commission_amount !== '' ? Number(s.commission_amount) : null);
+            const pct = Number(s.share_percent) > 0 ? Number(s.share_percent) : sharePct;
+            db.prepare(`
+              INSERT INTO coach_sports
+                (coach_id, sport, commission_percent, commission_amount, share_percent, gym_percent, hourly_rate)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+            `).run(
+              id,
+              canonicalSport(db, String(s.sport).trim()) || String(s.sport).trim(),
+              pct,
+              s.commission_amount != null && s.commission_amount !== '' ? Number(s.commission_amount) : null,
+              pct,
+              100 - pct,
+              s.hourly_rate != null && s.hourly_rate !== '' ? Number(s.hourly_rate) : null
+            );
           }
         }
       }
@@ -2291,15 +2396,56 @@ app.put('/accounting/coaches/:id', accountingGuards, (req, res) => {
     const id = Number(req.params.id);
     const existing = db.prepare('SELECT * FROM coaches WHERE id = ?').get(id);
     if (!existing) return res.status(404).json({ error: 'مربی پیدا نشد' });
-    const { name, phone, is_active, sports } = req.body || {};
-    db.prepare('UPDATE coaches SET name = ?, phone = ?, is_active = ? WHERE id = ?')
-      .run(name ? String(name).trim() : existing.name, phone != null ? String(phone).trim() : existing.phone, is_active ? 1 : 0, id);
+    const {
+      name, phone, is_active, sports,
+      national_id, pay_model, default_share, monthly_salary,
+      can_private, can_program, notes,
+    } = req.body || {};
+
+    const activeFlag = is_active === false || is_active === 0 ? 0 : (is_active == null ? existing.is_active : 1);
+    const model = ['share', 'fixed', 'hybrid'].includes(pay_model) ? pay_model : (existing.pay_model || 'share');
+    const sharePct = default_share != null ? Math.min(Math.max(Number(default_share) || 0, 0), 100) : (existing.default_share ?? DEFAULT_SHARE_PERCENT);
+    const salary = monthly_salary != null ? Number(monthly_salary) || 0 : (existing.monthly_salary || 0);
+    if ((model === 'fixed' || model === 'hybrid') && salary <= 0) {
+      return res.status(400).json({ error: 'برای مدل حقوق ثابت، مبلغ حقوق الزامی است' });
+    }
+
+    db.prepare(`
+      UPDATE coaches SET
+        name = ?, phone = ?, national_id = ?, is_active = ?, pay_model = ?,
+        default_share = ?, monthly_salary = ?, can_private = ?, can_program = ?, notes = ?
+      WHERE id = ?
+    `).run(
+      name ? String(name).trim() : existing.name,
+      phone != null ? String(phone).trim() : existing.phone,
+      national_id != null ? String(national_id).trim() : existing.national_id,
+      activeFlag,
+      model,
+      sharePct,
+      salary,
+      can_private === false ? 0 : (can_private == null ? (existing.can_private ?? 1) : 1),
+      can_program === false ? 0 : (can_program == null ? (existing.can_program ?? 0) : 1),
+      notes != null ? String(notes).trim() : existing.notes,
+      id
+    );
     db.prepare('DELETE FROM coach_sports WHERE coach_id = ?').run(id);
     if (Array.isArray(sports)) {
       for (const s of sports) {
         if (s && s.sport && String(s.sport).trim()) {
-          db.prepare('INSERT INTO coach_sports (coach_id, sport, commission_percent, commission_amount) VALUES (?, ?, ?, ?)')
-            .run(id, String(s.sport).trim(), Number(s.commission_percent) || 0, s.commission_amount != null && s.commission_amount !== '' ? Number(s.commission_amount) : null);
+          const pct = Number(s.share_percent) > 0 ? Number(s.share_percent) : sharePct;
+          db.prepare(`
+            INSERT INTO coach_sports
+              (coach_id, sport, commission_percent, commission_amount, share_percent, gym_percent, hourly_rate)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            id,
+            canonicalSport(db, String(s.sport).trim()) || String(s.sport).trim(),
+            pct,
+            s.commission_amount != null && s.commission_amount !== '' ? Number(s.commission_amount) : null,
+            pct,
+            100 - pct,
+            s.hourly_rate != null && s.hourly_rate !== '' ? Number(s.hourly_rate) : null
+          );
         }
       }
     }
@@ -2367,31 +2513,9 @@ app.get('/accounting/coach-report', accountingGuards, (req, res) => {
   }
 });
 
-// 🤝 تسویه مربی
-app.post('/accounting/coaches/:id/settle', accountingGuards, (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    const coach = db.prepare('SELECT * FROM coaches WHERE id = ?').get(id);
-    if (!coach) return res.status(404).json({ error: 'مربی پیدا نشد' });
-    const { period, amount, note } = req.body || {};
-    const amt = Number(amount);
-    if (!amt || amt <= 0) {
-      return res.status(400).json({ error: 'مبلغ تسویه باید بزرگ‌تر از صفر باشد' });
-    }
-    const p = period ? String(period).slice(0, 7) : new Date().toISOString().slice(0, 7);
-    const r = db.prepare('INSERT INTO coach_settlements (coach_id, period, amount, note, settled_by) VALUES (?, ?, ?, ?, ?)')
-      .run(id, p, amt, note ? String(note).trim() : null, req.staff.full_name);
-    audit(req, 'accounting.coach_settle', {
-      entityType: 'coach',
-      entityId: id,
-      detail: { period: p, amount: amt },
-    });
-    res.status(201).json(db.prepare('SELECT * FROM coach_settlements WHERE id = ?').get(r.lastInsertRowid));
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to settle coach' });
-  }
-});
+// نکته: مسیر POST /accounting/coaches/:id/settle در بخش «موتور سهم مربی — API»
+// (انتهای این فایل) تعریف شده است تا از سرویس settleCoach و جدول settlement_items
+// استفاده کند. نسخهٔ قدیمی که فقط یک عدد در ماه ثبت می‌کرد حذف شد.
 
 // 💸 هزینه‌ها
 app.get('/accounting/expenses', accountingGuards, (req, res) => {
@@ -2612,12 +2736,22 @@ const messagingGuards = [requireAuth, requireFeature('messaging')];
 app.get('/coach-sessions', requireAuth, requireFeature('coach_portal'), coachAccess, (req, res) => {
   try {
     const isAdmin = req.staff.role === 'admin';
+    // کاربر پنل ممکن است مربی نباشد؛ با نامش به مربی متناظر نگاشت می‌شود
+    const staffCoachId = staffToCoachId(db, req.staff);
     const rows = isAdmin
       ? db.prepare('SELECT * FROM coach_sessions ORDER BY session_date DESC, session_time DESC').all()
-      : db.prepare('SELECT * FROM coach_sessions WHERE coach_id = ? ORDER BY session_date DESC, session_time DESC').all(req.staff.id);
+      : staffCoachId
+        ? db.prepare('SELECT * FROM coach_sessions WHERE coach_id = ? ORDER BY session_date DESC, session_time DESC').all(staffCoachId)
+        : [];
     const list = rows.map((s) => {
       const m = s.member_id ? db.prepare('SELECT name, phone FROM members WHERE id = ?').get(s.member_id) : null;
-      return { ...s, member_name: m ? m.name : null, member_phone: m ? m.phone : null };
+      const c = s.coach_id ? db.prepare('SELECT name FROM coaches WHERE id = ?').get(s.coach_id) : null;
+      return {
+        ...s,
+        member_name: m ? m.name : null,
+        member_phone: m ? m.phone : null,
+        coach_name: (c && c.name) || s.coach_name || null,
+      };
     });
     res.json(list);
   } catch (err) {
@@ -2626,24 +2760,102 @@ app.get('/coach-sessions', requireAuth, requireFeature('coach_portal'), coachAcc
   }
 });
 
+/**
+ * کاربر پنل (staff) را به مربی متناظرش وصل می‌کند.
+ * مبنا: نام و تلفن. اگر مربی متناظری نبود، null برمی‌گردد (یعنی کاربر مربی نیست).
+ */
+function staffToCoachId(db, staff) {
+  if (!staff) return null;
+  const byName = db.prepare(
+    'SELECT id FROM coaches WHERE is_active = 1 AND REPLACE(REPLACE(name, \' \', \'\'), \'‌\', \'\') = ?'
+  ).get(String(staff.full_name || '').replace(/\s+/g, '').replace(/‌/g, ''));
+  if (byName) return Number(byName.id);
+  if (staff.phone) {
+    const byPhone = db.prepare('SELECT id FROM coaches WHERE is_active = 1 AND phone = ?').get(String(staff.phone).trim());
+    if (byPhone) return Number(byPhone.id);
+  }
+  return null;
+}
+
+/**
+ * مربیِ یک جلسه را مشخص می‌کند.
+ *
+ * اولویت:
+ *  ۱) coach_id صریح در بدنه درخواست
+ *  ۲) مربیِ ثبت‌نامِ عضو در همان رشته (member_sessions.coach_id)
+ *  ۳) تنها مربیِ فعالِ رشته (اگر فقط یکی باشد)
+ *
+ * اگر هیچ‌کدوم نبود، null برمی‌گردد تا مدیر بعداً تخصیص بدهد —
+ * بهتر از اینکه سهم به کاربر اشتباه نسبت داده شود.
+ */
+function resolveSessionCoach(db, { coach_id, member_id, sport, session_type }) {
+  const isPrivate = session_type === 'personal' || session_type === 'private';
+
+  // ۱) انتخاب صریح
+  if (coach_id != null && coach_id !== '') {
+    const row = db.prepare('SELECT id, name FROM coaches WHERE id = ? AND is_active = 1').get(Number(coach_id));
+    if (row) {
+      return { coach_id: row.id, coach_name: row.name, sport: sport || null };
+    }
+  }
+
+  // رشتهٔ جلسه: صریح، وگرنه از ثبت‌نام عضو
+  let sportName = sport ? String(sport).trim() : null;
+  if (!sportName && member_id) {
+    const ms = db.prepare('SELECT sport, coach_id, coach_name FROM member_sports WHERE member_id = ? ORDER BY id LIMIT 1').get(member_id);
+    if (ms) {
+      sportName = ms.sport || null;
+      // ۲) مربیِ ثبت‌نام
+      if (ms.coach_id && (!sport || normalizeSportName(ms.sport || '') === normalizeSportName(sport))) {
+        const row = db.prepare('SELECT id, name FROM coaches WHERE id = ? AND is_active = 1').get(ms.coach_id);
+        if (row) return { coach_id: row.id, coach_name: row.name, sport: sportName };
+      }
+    }
+  }
+
+  if (sportName) {
+    const canonical = canonicalSport(db, sportName);
+    const list = coachesForSport(db, canonical);
+    const allowed = isPrivate ? list.filter((c) => c.can_private) : list;
+    // ۳) تنها مربیِ رشته
+    if (allowed.length === 1) {
+      return { coach_id: allowed[0].id, coach_name: allowed[0].name, sport: canonical };
+    }
+    return { coach_id: null, coach_name: null, sport: canonical };
+  }
+
+  return { coach_id: null, coach_name: null, sport: null };
+}
+
 app.post('/coach-sessions', requireAuth, requireFeature('coach_portal'), coachAccess, (req, res) => {
-  const { member_id, session_date, session_time, duration_minutes, session_type, notes } = req.body || {};
+  const {
+    member_id, session_date, session_time, duration_minutes, session_type, notes,
+    coach_id, sport,
+  } = req.body || {};
   if (!member_id) return res.status(400).json({ error: 'انتخاب عضو الزامی است' });
   if (!session_date || !session_time) return res.status(400).json({ error: 'تاریخ و ساعت جلسه الزامی است' });
   const member = db.prepare('SELECT id, name FROM members WHERE id = ?').get(Number(member_id));
   if (!member) return res.status(400).json({ error: 'عضو یافت نشد' });
+
+  // ⚠️ نکته مهم: coach_id باید به جدول coaches اشاره کند (نه staff.id)،
+  // وگرنه سهم مالی به کاربر پنل به‌جای مربی واقعی ثبت می‌شود.
+  const resolved = resolveSessionCoach(db, { coach_id, member_id: Number(member_id), sport, session_type });
+  const coachName = resolved.coach_name
+    || (req.staff.role === 'admin' ? req.staff.full_name : 'مربی');
+
   try {
     const info = db.prepare(`
-      INSERT INTO coach_sessions (coach_id, coach_name, member_id, session_date, session_time, duration_minutes, session_type, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO coach_sessions (coach_id, coach_name, member_id, session_date, session_time, duration_minutes, session_type, sport, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      req.staff.id,
-      req.staff.full_name,
+      resolved.coach_id,
+      coachName,
       Number(member_id),
       String(session_date),
       String(session_time),
       Number(duration_minutes) || 60,
       session_type ? String(session_type) : 'personal',
+      resolved.sport || (sport ? String(sport) : null),
       notes ? String(notes) : null
     );
     const row = db.prepare('SELECT * FROM coach_sessions WHERE id = ?').get(info.lastInsertRowid);
@@ -2651,7 +2863,7 @@ app.post('/coach-sessions', requireAuth, requireFeature('coach_portal'), coachAc
       entityType: 'coach_session',
       entityId: info.lastInsertRowid,
       memberId: Number(member_id),
-      detail: { date: session_date, time: session_time, type: session_type },
+      detail: { date: session_date, time: session_time, type: session_type, coach_id: resolved.coach_id },
     });
     res.status(201).json({ ...row, member_name: member.name });
   } catch (err) {
@@ -2665,7 +2877,8 @@ app.patch('/coach-sessions/:id', requireAuth, requireFeature('coach_portal'), co
   const existing = db.prepare('SELECT * FROM coach_sessions WHERE id = ?').get(id);
   if (!existing) return res.status(404).json({ error: 'جلسه یافت نشد' });
   const isAdmin = req.staff.role === 'admin';
-  if (!isAdmin && existing.coach_id !== req.staff.id) {
+  const staffCoachId = staffToCoachId(db, req.staff);
+  if (!isAdmin && (staffCoachId == null || existing.coach_id !== staffCoachId)) {
     return res.status(403).json({ error: 'شما دسترسی به این جلسه ندارید' });
   }
   const { status, notes, session_date, session_time, duration_minutes, session_type } = req.body || {};
@@ -2719,7 +2932,8 @@ app.delete('/coach-sessions/:id', requireAuth, requireFeature('coach_portal'), c
   const existing = db.prepare('SELECT * FROM coach_sessions WHERE id = ?').get(id);
   if (!existing) return res.status(404).json({ error: 'جلسه یافت نشد' });
   const isAdmin = req.staff.role === 'admin';
-  if (!isAdmin && existing.coach_id !== req.staff.id) {
+  const staffCoachId = staffToCoachId(db, req.staff);
+  if (!isAdmin && (staffCoachId == null || existing.coach_id !== staffCoachId)) {
     return res.status(403).json({ error: 'شما دسترسی به این جلسه ندارید' });
   }
   try {
@@ -2822,7 +3036,8 @@ app.put('/coach-programs/:id', coachGuards, (req, res) => {
   const existing = db.prepare('SELECT * FROM workout_programs WHERE id = ?').get(id);
   if (!existing) return res.status(404).json({ error: 'برنامه یافت نشد' });
   const isAdmin = req.staff.role === 'admin';
-  if (!isAdmin && existing.coach_id !== req.staff.id) {
+  const staffCoachId = staffToCoachId(db, req.staff);
+  if (!isAdmin && (staffCoachId == null || existing.coach_id !== staffCoachId)) {
     return res.status(403).json({ error: 'شما دسترسی به این برنامه ندارید' });
   }
   const { title, goal, notes, items } = req.body || {};
@@ -2874,7 +3089,8 @@ app.patch('/coach-programs/:id/items/:itemId', coachGuards, (req, res) => {
   const existing = db.prepare('SELECT * FROM workout_programs WHERE id = ?').get(id);
   if (!existing) return res.status(404).json({ error: 'برنامه یافت نشد' });
   const isAdmin = req.staff.role === 'admin';
-  if (!isAdmin && existing.coach_id !== req.staff.id) {
+  const staffCoachId = staffToCoachId(db, req.staff);
+  if (!isAdmin && (staffCoachId == null || existing.coach_id !== staffCoachId)) {
     return res.status(403).json({ error: 'شما دسترسی به این برنامه ندارید' });
   }
   const item = db.prepare('SELECT * FROM workout_program_items WHERE id = ? AND program_id = ?').get(itemId, id);
@@ -2894,7 +3110,8 @@ app.delete('/coach-programs/:id', coachGuards, (req, res) => {
   const existing = db.prepare('SELECT * FROM workout_programs WHERE id = ?').get(id);
   if (!existing) return res.status(404).json({ error: 'برنامه یافت نشد' });
   const isAdmin = req.staff.role === 'admin';
-  if (!isAdmin && existing.coach_id !== req.staff.id) {
+  const staffCoachId = staffToCoachId(db, req.staff);
+  if (!isAdmin && (staffCoachId == null || existing.coach_id !== staffCoachId)) {
     return res.status(403).json({ error: 'شما دسترسی به این برنامه ندارید' });
   }
   try {
@@ -3273,6 +3490,379 @@ app.delete('/accounting/sport-plans/:id', accountingGuards, (req, res) => {
   } catch (err) {
     console.error('DELETE /accounting/sport-plans/:id', err);
     res.status(500).json({ error: 'Failed to delete sport plan' });
+  }
+});
+
+// ════════════════════════════════════════════════���═════════════════
+//  فاز ۶ — تقسیم جلسه بین چند مربی
+// ═══════════════════════════════════════════════════════════════════
+
+app.get('/accounting/coach-sessions/:id/splits', accountingGuards, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const session = db.prepare('SELECT * FROM coach_sessions WHERE id = ?').get(id);
+    if (!session) return res.status(404).json({ error: 'جلسه پیدا نشد' });
+    res.json({ session_id: id, splits: getSessionSplits(db, id) });
+  } catch (err) {
+    console.error('GET /accounting/coach-sessions/:id/splits', err);
+    res.status(500).json({ error: 'Failed to load splits' });
+  }
+});
+
+app.put('/accounting/coach-sessions/:id/splits', accountingGuards, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const result = setSessionSplits(db, id, (req.body || {}).splits);
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    audit(req, 'accounting.session_split', { entityType: 'coach_session', entityId: id, detail: { splits: result.splits } });
+    res.json(result);
+  } catch (err) {
+    console.error('PUT /accounting/coach-sessions/:id/splits', err);
+    res.status(500).json({ error: 'Failed to set splits' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+//  فاز ۷ — کسورات و پاداش
+// ═══════════════════════════════════════════════════════════════════
+
+app.get('/accounting/coaches/:id/adjustments', accountingGuards, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const coach = db.prepare('SELECT id, name FROM coaches WHERE id = ?').get(id);
+    if (!coach) return res.status(404).json({ error: 'مربی پیدا نشد' });
+    res.json({ coach, adjustments: listAdjustments(db, id, (req.query || {}).period) });
+  } catch (err) {
+    console.error('GET /accounting/coaches/:id/adjustments', err);
+    res.status(500).json({ error: 'Failed to list adjustments' });
+  }
+});
+
+app.post('/accounting/coaches/:id/adjustments', accountingGuards, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const coach = db.prepare('SELECT id, name FROM coaches WHERE id = ?').get(id);
+    if (!coach) return res.status(404).json({ error: 'مربی پیدا نشد' });
+    const result = addAdjustment(db, {
+      coachId: id,
+      period: (req.body || {}).period,
+      kind: (req.body || {}).kind,
+      amount: (req.body || {}).amount,
+      reason: (req.body || {}).reason,
+      actor: req.staff.full_name,
+    });
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    audit(req, `accounting.adjustment_${(req.body || {}).kind}`, {
+      entityType: 'coach_adjustment', entityId: result.id,
+      detail: { coach: coach.name, period: result.adjustment.period, amount: result.adjustment.amount },
+    });
+    res.status(201).json(result);
+  } catch (err) {
+    console.error('POST /accounting/coaches/:id/adjustments', err);
+    res.status(500).json({ error: 'Failed to add adjustment' });
+  }
+});
+
+app.delete('/accounting/adjustments/:id', accountingGuards, (req, res) => {
+  try {
+    const result = deleteAdjustment(db, req.params.id);
+    if (!result.ok) return res.status(404).json({ error: result.error });
+    audit(req, 'accounting.adjustment_delete', {
+      entityType: 'coach_adjustment', entityId: Number(req.params.id),
+      detail: { kind: result.deleted.kind, amount: result.deleted.amount },
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /accounting/adjustments/:id', err);
+    res.status(500).json({ error: 'Failed to delete adjustment' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+//  فاز ۸ — تسویه دقیق
+// ═══════════════════════════════════════════════════════════════════
+
+// پیش‌نمایش تسویه (بدون ثبت) — برای اینکه مدیر قبل از تأیید ببیند چه چیزی تسویه می‌شود
+app.get('/accounting/coaches/:id/settle-preview', accountingGuards, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const period = String((req.query || {}).period || periodOf(new Date())).slice(0, 7);
+    const coach = db.prepare('SELECT * FROM coaches WHERE id = ?').get(id);
+    if (!coach) return res.status(404).json({ error: 'مربی پیدا نشد' });
+
+    const from = `${period}-01`;
+    const to = `${period}-31`;
+    const pending = db.prepare(`
+      SELECT * FROM coach_earnings
+      WHERE coach_id = ? AND settlement_id IS NULL AND earned_at BETWEEN ? AND ?
+      ORDER BY earned_at, id
+    `).all(id, from, to);
+
+    const adj = db.prepare(`
+      SELECT COALESCE(SUM(CASE WHEN kind='deduction' THEN amount ELSE 0 END),0) AS d,
+             COALESCE(SUM(CASE WHEN kind='bonus'     THEN amount ELSE 0 END),0) AS b
+      FROM coach_adjustments WHERE coach_id = ? AND period = ?
+    `).get(id, period);
+
+    // حقوق ثابت: اگر وجود دارد ولی سطر حقوق ندارد، در پیش‌نمایش هم نشان بده
+    const salaryPending = (coach.pay_model === 'fixed' || coach.pay_model === 'hybrid')
+      && Number(coach.monthly_salary) > 0
+      && !db.prepare("SELECT id FROM coach_earnings WHERE coach_id=? AND period=? AND source_type='salary'").get(id, period)
+      ? Number(coach.monthly_salary) : 0;
+
+    const gross = pending.reduce((s, r) => s + (Number(r.net) || 0), 0) + salaryPending;
+
+    res.json({
+      coach: { id: coach.id, name: coach.name, pay_model: coach.pay_model, monthly_salary: coach.monthly_salary },
+      period,
+      items: pending,
+      item_count: pending.length + (salaryPending > 0 ? 1 : 0),
+      salary_pending: salaryPending,
+      gross,
+      bonuses: Number(adj.b) || 0,
+      deductions: Number(adj.d) || 0,
+      net: gross + (Number(adj.b) || 0) - (Number(adj.d) || 0),
+    });
+  } catch (err) {
+    console.error('GET /accounting/coaches/:id/settle-preview', err);
+    res.status(500).json({ error: 'Failed to build settle preview' });
+  }
+});
+
+app.post('/accounting/coaches/:id/settle', accountingGuards, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const body = req.body || {};
+    const result = settleCoach(db, {
+      coachId: id,
+      period: body.period || periodOf(new Date()),
+      from: body.from,
+      to: body.to,
+      includeAdjustments: body.includeAdjustments !== false,
+      note: body.note,
+      actor: req.staff.full_name,
+    });
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    audit(req, 'accounting.coach_settle', {
+      entityType: 'coach_settlement', entityId: result.settlement_id,
+      detail: { coach_id: id, period: result.settlement.period, net: result.net, items: result.items },
+    });
+    res.status(201).json(result);
+  } catch (err) {
+    console.error('POST /accounting/coaches/:id/settle', err);
+    res.status(500).json({ error: 'Failed to settle coach' });
+  }
+});
+
+// تسویه گروهی: همه مربیان یک دوره با یک درخواست
+app.post('/accounting/coaches/settle-all', accountingGuards, (req, res) => {
+  try {
+    const body = req.body || {};
+    const period = String(body.period || periodOf(new Date())).slice(0, 7);
+    const ids = Array.isArray(body.coach_ids) && body.coach_ids.length
+      ? body.coach_ids.map(Number).filter(Boolean)
+      : db.prepare('SELECT id FROM coaches WHERE is_active = 1').all().map((r) => r.id);
+
+    const results = ids.map((cid) => {
+      const r = settleCoach(db, {
+        coachId: cid,
+        period,
+        includeAdjustments: body.includeAdjustments !== false,
+        note: body.note || `تسویه گروهی ${period}`,
+        actor: req.staff.full_name,
+      });
+      return { coach_id: cid, ok: r.ok, error: r.error, net: r.net, items: r.items };
+    });
+
+    const settled = results.filter((r) => r.ok);
+    audit(req, 'accounting.coach_settle_all', {
+      entityType: 'coach_settlement',
+      detail: { period, settled: settled.length, total_net: settled.reduce((s, r) => s + (r.net || 0), 0) },
+    });
+
+    res.json({
+      period,
+      settled_count: settled.length,
+      skipped_count: results.length - settled.length,
+      total_net: settled.reduce((s, r) => s + (r.net || 0), 0),
+      results,
+    });
+  } catch (err) {
+    console.error('POST /accounting/coaches/settle-all', err);
+    res.status(500).json({ error: 'Failed to settle all coaches' });
+  }
+});
+
+app.get('/accounting/settlements', accountingGuards, (req, res) => {
+  try {
+    const { coach_id, period } = req.query || {};
+    const rows = db.prepare(`
+      SELECT s.*, c.name AS coach_name, c.phone AS coach_phone
+      FROM coach_settlements s
+      JOIN coaches c ON c.id = s.coach_id
+      WHERE ${coach_id ? 's.coach_id = ?' : '1=1'}
+        ${period ? 'AND s.period = ?' : ''}
+      ORDER BY s.created_at DESC, s.id DESC
+    `).all(...[coach_id ? Number(coach_id) : null, period ? String(period) : null].filter((x) => x != null));
+    res.json(rows);
+  } catch (err) {
+    console.error('GET /accounting/settlements', err);
+    res.status(500).json({ error: 'Failed to list settlements' });
+  }
+});
+
+app.get('/accounting/settlements/:id', accountingGuards, (req, res) => {
+  try {
+    const detail = settlementDetail(db, req.params.id);
+    if (!detail) return res.status(404).json({ error: 'تسویه پیدا نشد' });
+    res.json(detail);
+  } catch (err) {
+    console.error('GET /accounting/settlements/:id', err);
+    res.status(500).json({ error: 'Failed to load settlement' });
+  }
+});
+
+app.delete('/accounting/settlements/:id', accountingGuards, (req, res) => {
+  try {
+    const result = cancelSettlement(db, req.params.id);
+    if (!result.ok) return res.status(404).json({ error: result.error });
+    audit(req, 'accounting.settlement_cancel', {
+      entityType: 'coach_settlement', entityId: Number(req.params.id),
+      detail: { coach_id: result.cancelled.coach_id, net: result.cancelled.net },
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /accounting/settlements/:id', err);
+    res.status(500).json({ error: 'Failed to cancel settlement' });
+  }
+});
+
+// خروجی Excel/CSV تسویه (فاز ۱۱ پشتیبان)
+app.get('/accounting/settlements/:id/export.csv', accountingGuards, (req, res) => {
+  try {
+    const detail = settlementDetail(db, req.params.id);
+    if (!detail) return res.status(404).json({ error: 'تسویه پیدا نشد' });
+    const fa = new Intl.NumberFormat('fa-IR');
+    const { settlement: s, coach, items, adjustments } = detail;
+    const rows = [
+      // سربرگ
+      ['تسویه مربی', coach.name],
+      ['دوره', s.period],
+      ['از', s.period_start || '-'],
+      ['تا', s.period_end || '-'],
+      ['جمع ناخالص', fa.format(s.gross || 0)],
+      ['پاداش', fa.format(adjustments.filter((a) => a.kind === 'bonus').reduce((x, a) => x + a.amount, 0))],
+      ['کسورات', fa.format(s.deductions || 0)],
+      ['خالص پرداختی', fa.format(s.net || 0)],
+      ['تعداد آیتم', String(items.length)],
+      [],
+      // ریز
+      ['تاریخ', 'عضو', 'رشته', 'نوع', 'نرخ واحد', 'درصد', 'مبلغ'],
+      ...items.map((i) => [
+        i.earned_at, i.member_name || '-', i.sport || '-',
+        i.source_type === 'session' ? 'جلسه' : (i.source_type === 'salary' ? 'حقوق ثابت' : i.source_type),
+        fa.format(i.unit_price || 0), `${fa.format(i.share_percent || 0)}٪`, fa.format(i.net || 0),
+      ]),
+    ];
+    if (adjustments.length) {
+      rows.push([], ['کسورات و پاداش دوره']);
+      rows.push(['نوع', 'مبلغ', 'دلیل']);
+      for (const a of adjustments) {
+        rows.push([a.kind === 'bonus' ? 'پاداش' : 'کسورات', fa.format(a.amount), a.reason || '-']);
+      }
+    }
+    sendCsv(res, `settlement-${s.period}-${coach.name}.csv`, null, rows);
+  } catch (err) {
+    console.error('GET /accounting/settlements/:id/export.csv', err);
+    res.status(500).json({ error: 'Failed to export settlement' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+//  فاز ۹ — گزارش‌ها
+// ═══════════════════════════════════════════════════════════════════
+
+// داشبورد سودآوری مربیان
+app.get('/accounting/coach-earnings', accountingGuards, (req, res) => {
+  try {
+    const { f, t } = periodBounds(req.query.from, req.query.to);
+    res.json(coachProfitability(db, f, t));
+  } catch (err) {
+    console.error('GET /accounting/coach-earnings', err);
+    res.status(500).json({ error: 'Failed to build coach earnings report' });
+  }
+});
+
+// گزارش سودآوری هر رشته
+app.get('/accounting/sport-profitability', accountingGuards, (req, res) => {
+  try {
+    const { f, t } = periodBounds(req.query.from, req.query.to);
+    res.json(sportProfitability(db, f, t));
+  } catch (err) {
+    console.error('GET /accounting/sport-profitability', err);
+    res.status(500).json({ error: 'Failed to build sport profitability report' });
+  }
+});
+
+// پیش‌بینی پایان ماه یک مربی
+app.get('/accounting/coaches/:id/forecast', accountingGuards, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const coach = db.prepare('SELECT id, name FROM coaches WHERE id = ?').get(id);
+    if (!coach) return res.status(404).json({ error: 'مربی پیدا نشد' });
+    res.json({ coach, ...forecastMonth(db, id, (req.query || {}).period) });
+  } catch (err) {
+    console.error('GET /accounting/coaches/:id/forecast', err);
+    res.status(500).json({ error: 'Failed to build forecast' });
+  }
+});
+
+// ریز سهم‌های یک مربی (قابل فیلتر بر اساس دوره و تسویه‌شدن)
+app.get('/accounting/coach-earnings/:coachId', accountingGuards, (req, res) => {
+  try {
+    const coachId = Number(req.params.coachId);
+    const coach = db.prepare('SELECT * FROM coaches WHERE id = ?').get(coachId);
+    if (!coach) return res.status(404).json({ error: 'مربی پیدا نشد' });
+    const { f, t } = periodBounds(req.query.from, req.query.to);
+    const onlyUnsettled = String((req.query || {}).settled || '') === 'false';
+
+    const rows = db.prepare(`
+      SELECT * FROM coach_earnings
+      WHERE coach_id = ? AND earned_at BETWEEN ? AND ?
+        ${onlyUnsettled ? 'AND settlement_id IS NULL' : ''}
+      ORDER BY earned_at DESC, id DESC
+    `).all(coachId, f, t);
+
+    const settlements = db.prepare(
+      'SELECT id, period, net, amount, settled_by, created_at FROM coach_settlements WHERE coach_id = ? ORDER BY created_at DESC'
+    ).all(coachId);
+
+    const adjustments = listAdjustments(db, coachId, String(f).slice(0, 7));
+
+    res.json({
+      coach,
+      from: f, to: t,
+      summary: summarizeCoach(db, coachId, f, t),
+      earnings: rows,
+      settlements,
+      adjustments,
+    });
+  } catch (err) {
+    console.error('GET /accounting/coach-earnings/:coachId', err);
+    res.status(500).json({ error: 'Failed to load coach earnings detail' });
+  }
+});
+
+// تطبیق استفاده از پلن یک عضو
+app.get('/accounting/members/:id/plan-utilization', accountingGuards, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const member = db.prepare('SELECT id, name FROM members WHERE id = ?').get(id);
+    if (!member) return res.status(404).json({ error: 'عضو پیدا نشد' });
+    res.json({ member, plans: planUtilization(db, id) });
+  } catch (err) {
+    console.error('GET /accounting/members/:id/plan-utilization', err);
+    res.status(500).json({ error: 'Failed to load plan utilization' });
   }
 });
 

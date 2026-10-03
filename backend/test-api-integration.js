@@ -124,11 +124,18 @@ async function setFeature(feature, enabled) {
       check('sport_plan_id linked', !!sp?.sport_plan_id, `got ${sp?.sport_plan_id}`);
     }
 
+    // بدنسازی دو مربی دارد، پس مربی باید صریح انتخاب شود
+    const bb = await api('/accounting/coaches/by-sport?sport=بدنسازی', { token });
+    const bbCoach = bb.data?.coaches?.[0];
+    check('مربی بدنسازی پیدا شد', !!bbCoach, JSON.stringify(bb.data).slice(0, 120));
+
     const session = await api('/coach-sessions', {
       method: 'POST',
       token,
       body: {
         member_id: made.memberId,
+        coach_id: bbCoach?.id,
+        sport: 'بدنسازی',
         session_date: '2026-09-15',
         session_time: '18:00',
         duration_minutes: 60,

@@ -56,16 +56,18 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import FeatureLockedScreen from '../components/FeatureLockedScreen';
+import CoachEarningsPanel from '../components/CoachEarningsPanel';
 
-type TabKey = 'dashboard' | 'income' | 'coaches' | 'payments' | 'expenses' | 'ledger';
+type TabKey = 'dashboard' | 'income' | 'coaches' | 'coachEngine' | 'payments' | 'expenses' | 'ledger';
 
 const tabs: { key: TabKey; label: string; icon: typeof LayoutDashboard }[] = [
-  { key: 'dashboard', label: 'داشبورد مالی', icon: LayoutDashboard },
-  { key: 'income',    label: 'درآمد رشته‌ها', icon: BarChart3 },
-  { key: 'coaches',   label: 'سهم مربی',      icon: Users2 },
-  { key: 'payments',  label: 'پرداخت‌ها',     icon: Wallet },
-  { key: 'expenses',  label: 'هزینه‌ها',      icon: Receipt },
-  { key: 'ledger',    label: 'گردش حساب',     icon: History },
+  { key: 'dashboard',   label: 'داشبورد مالی',  icon: LayoutDashboard },
+  { key: 'income',      label: 'درآمد رشته‌ها',  icon: BarChart3 },
+  { key: 'coaches',     label: 'فهرست مربیان',  icon: Users2 },
+  { key: 'coachEngine', label: 'موتور سهم مربی', icon: TrendingUp },
+  { key: 'payments',    label: 'پرداخت‌ها',      icon: Wallet },
+  { key: 'expenses',    label: 'هزینه‌ها',       icon: Receipt },
+  { key: 'ledger',      label: 'گردش حساب',      icon: History },
 ];
 
 export default function Accounting() {
@@ -132,6 +134,7 @@ export default function Accounting() {
       {tab === 'dashboard' && <DashboardTab period={period} />}
       {tab === 'income' && <IncomeTab period={period} />}
       {tab === 'coaches' && <CoachesTab period={period} />}
+      {tab === 'coachEngine' && <CoachEarningsPanel period={period} />}
       {tab === 'payments' && <PaymentsTab period={period} />}
       {tab === 'expenses' && <ExpensesTab period={period} />}
       {tab === 'ledger' && <LedgerTab />}

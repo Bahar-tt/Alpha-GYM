@@ -232,7 +232,7 @@ function earnFromSession(db, sessionId) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  const markSession = db.prepare('UPDATE coach_sessions SET share_percent = ?, coach_share_amount = ?, earnings_id = ? WHERE id = ?');
+  const markSession = db.prepare('UPDATE coach_sessions SET share_percent = ?, coach_share_amount = ?, unit_price = ?, earnings_id = ? WHERE id = ?');
 
   const out = { ok: true, earnings: [], unit_price: unitPrice, share_percent: baseSharePercent, sport };
 
@@ -247,8 +247,8 @@ function earnFromSession(db, sessionId) {
 
       const gross = clampMoney((unitPrice * effectiveShare) / 100);
       const note = splits.length
-        ? `جلسه ${sid} — ${sport || ''} — ${duration} دقیقه (${splitPct}٪ تقسیم)`
-        : `جلسه ${sid} — ${sport || ''} — ${duration} دقیقه`;
+        ? `جلسه ${sid} — ${sport || ''} — ${duration} دقیقه — ${baseSharePercent}٪ × ${splitPct}٪ تقسیم = ${effectiveShare}٪`
+        : `جلسه ${sid} — ${sport || ''} — ${duration} دقیقه — ${baseSharePercent}٪`;
 
       const res = ins.run(
         coachId,
@@ -260,7 +260,8 @@ function earnFromSession(db, sessionId) {
         period,
         earnedAt,
         unitPrice,
-        effectiveShare,
+        // سهم پایهٔ مربی (۵۰) در share_percent ذخیره می‌شود؛ درصد مشارکت در یادداشت
+        baseSharePercent,
         gross,
         gross,
         note
@@ -270,7 +271,8 @@ function earnFromSession(db, sessionId) {
         const earning = db.prepare('SELECT * FROM coach_earnings WHERE id = ?').get(res.lastInsertRowid);
         out.earnings.push(earning);
         if (!session.earnings_id && coachId === Number(session.coach_id)) {
-          markSession.run(effectiveShare, gross, res.lastInsertRowid, sid);
+          // unit_price روی جلسه اسنپ می‌شود تا بازمحاسبه قطعی باشد
+          markSession.run(baseSharePercent, gross, unitPrice, res.lastInsertRowid, sid);
         }
       } else {
         // سطر از قبل موجود بود (idempotent) — همان را برمی‌گردانیم
@@ -281,9 +283,18 @@ function earnFromSession(db, sessionId) {
       }
     }
 
-    // سهم باشگاه فقط برای مربیِ اصلی جلسه یک‌بار ثبت می‌شود
+    // سهم باشگاه فقط برای مربیِ اصلی جلسه یک‌بار ثبت می‌شود.
+    // چون session_id یکتاست، رکورد موجود به‌روزرسانی می‌شود تا بازمحاسبه
+    // مقدار کهنه را نگه ندارد.
     if (gymPercent > 0 && Number(session.coach_id)) {
       const gymAmount = clampMoney((unitPrice * gymPercent) / 100);
+      const coachShare = clampMoney((unitPrice * baseSharePercent) / 100);
+      const updRevenue = db.prepare(`
+        UPDATE session_revenue SET
+          unit_price = ?, gross_revenue = ?, coach_share = ?, gym_share = ?,
+          share_percent = ?, period = ?, occurred_at = ?
+        WHERE session_id = ?
+      `);
       const rev = insRevenue.run(
         sid,
         session.member_id ? Number(session.member_id) : null,
@@ -292,20 +303,124 @@ function earnFromSession(db, sessionId) {
         Number(session.coach_id),
         unitPrice,
         unitPrice,
-        clampMoney((unitPrice * baseSharePercent) / 100),
+        coachShare,
         gymAmount,
         baseSharePercent,
         period,
         earnedAt
       );
       if (rev.changes === 0) {
-        // از قبل ثبت شده — نگه می‌داریم (بدون خطا)
+        updRevenue.run(unitPrice, unitPrice, coachShare, gymAmount, baseSharePercent, period, earnedAt, sid);
       }
     }
   });
 
   run();
   return out;
+}
+
+/**
+ * تنظیم تقسیم یک جلسه بین چند مربی.
+ *
+ * مثال: برنامه ترکیبی بدنسازی + TRX
+ *   splits = [{ coach_id: 3, share_percent: 60 }, { coach_id: 7, share_percent: 40 }]
+ *   سهم رضا = ۵۰٪ × ۶۰٪ ، سهم امیر = ۵۰٪ × ۴۰٪
+ *
+ * اعتبارسنجی: مجموع درصدها باید دقیقاً ۱۰۰ باشد و هر مربی فعال باشد.
+ * اگر جلسه قبلاً completed و تسویه‌نشده بود، سهم‌ها دوباره ساخته می‌شوند.
+ *
+ * @returns {{ok: boolean, splits?: Array, error?: string}}
+ */
+function setSessionSplits(db, sessionId, splits) {
+  const sid = Number(sessionId);
+  const session = db.prepare('SELECT * FROM coach_sessions WHERE id = ?').get(sid);
+  if (!session) return { ok: false, error: 'جلسه پیدا نشد' };
+
+  const clean = (Array.isArray(splits) ? splits : [])
+    .map((s) => ({
+      coach_id: Number(s && s.coach_id) || 0,
+      share_percent: Math.round(Number(s && s.share_percent) || 0),
+    }))
+    .filter((s) => s.coach_id > 0 && s.share_percent > 0);
+
+  // مربی‌های تکراری ادغام می‌شوند
+  const merged = new Map();
+  for (const s of clean) {
+    merged.set(s.coach_id, (merged.get(s.coach_id) || 0) + s.share_percent);
+  }
+  const final = Array.from(merged, ([coach_id, share_percent]) => ({ coach_id, share_percent }));
+
+  if (final.length === 0) {
+    // تقسیم را برداشتن = مربیِ اصلی جلسه، ۱۰۰٪
+    const del = db.prepare('DELETE FROM coach_session_splits WHERE session_id = ?');
+    const clearMark = db.prepare('UPDATE coach_sessions SET split_done = 0 WHERE id = ?');
+    const run = db.transaction(() => { del.run(sid); clearMark.run(sid); });
+    run();
+    // سهم‌ها باید با وضعیت جدید بازسازی شوند (وگرنه سهم تقسیم‌شده باقی می‌ماند)
+    let earnings = null;
+    if (session.status === 'completed') {
+      revokeSessionEarnings(db, sid);
+      earnings = earnFromSession(db, sid);
+    }
+    return { ok: true, splits: [], earnings };
+  }
+
+  if (final.length < 2) return { ok: false, error: 'برای تقسیم، حداقل دو مربی لازم است' };
+
+  const total = final.reduce((s, x) => s + x.share_percent, 0);
+  if (total !== 100) {
+    return { ok: false, error: `مجموع درصدها باید ۱۰۰ باشد (فعلی: ${total})` };
+  }
+
+  // همه مربیان باید فعال باشند
+  const ids = final.map((s) => s.coach_id);
+  const active = db.prepare(
+    `SELECT id, name FROM coaches WHERE id IN (${ids.map(() => '?').join(',')}) AND is_active = 1`
+  ).all(...ids);
+  if (active.length !== ids.length) {
+    const found = new Set(active.map((a) => a.id));
+    const missing = ids.filter((i) => !found.has(i));
+    return { ok: false, error: `مربی غیرفعال یا ناموجود: ${missing.join('، ')}` };
+  }
+
+  const del = db.prepare('DELETE FROM coach_session_splits WHERE session_id = ?');
+  const ins = db.prepare(
+    'INSERT INTO coach_session_splits (session_id, coach_id, share_percent) VALUES (?, ?, ?)'
+  );
+  const mark = db.prepare('UPDATE coach_sessions SET split_done = 1 WHERE id = ?');
+
+  const run = db.transaction(() => {
+    del.run(sid);
+    for (const s of final) ins.run(sid, s.coach_id, s.share_percent);
+    mark.run(sid);
+  });
+  run();
+
+  // اگر جلسه completed بود، سهم‌ها را با تقسیم جدید بازسازی کن
+  let earnings = null;
+  if (session.status === 'completed') {
+    revokeSessionEarnings(db, sid);
+    earnings = earnFromSession(db, sid);
+  }
+
+  const rows = db.prepare(
+    'SELECT sp.coach_id, sp.share_percent, c.name FROM coach_session_splits sp JOIN coaches c ON c.id = sp.coach_id WHERE sp.session_id = ? ORDER BY sp.id'
+  ).all(sid);
+
+  return { ok: true, splits: rows, earnings };
+}
+
+/** خواندن تقسیم یک جلسه (برای UI) */
+function getSessionSplits(db, sessionId) {
+  return db.prepare(`
+    SELECT sp.id, sp.coach_id, sp.share_percent, c.name, c.phone,
+           cs.share_percent AS coach_share_percent
+    FROM coach_session_splits sp
+    JOIN coaches c ON c.id = sp.coach_id
+    LEFT JOIN coach_sports cs ON cs.coach_id = c.id AND cs.sport = ?
+    WHERE sp.session_id = ?
+    ORDER BY sp.id
+  `).all(String(db.prepare('SELECT sport FROM coach_sessions WHERE id = ?').get(Number(sessionId))?.sport || ''), Number(sessionId));
 }
 
 /**
@@ -318,9 +433,11 @@ function revokeSessionEarnings(db, sessionId) {
   const sid = Number(sessionId);
   if (!sid) return { ok: false, removed: 0, skipped_settled: 0 };
 
+  // هم با source_id و هم با session_id می‌گردیم: رکوردهای قدیمی ممکن است
+  // فقط با یکی از این دو ستون قابل ردیابی باشند.
   const rows = db.prepare(
-    "SELECT * FROM coach_earnings WHERE source_type = 'session' AND source_id = ?"
-  ).all(sid);
+    "SELECT * FROM coach_earnings WHERE source_type = 'session' AND (source_id = ? OR session_id = ?)"
+  ).all(sid, sid);
 
   const del = db.prepare('DELETE FROM coach_earnings WHERE id = ?');
   const delRev = db.prepare('DELETE FROM session_revenue WHERE session_id = ?');
@@ -416,6 +533,349 @@ function summarizeCoach(db, coachId, from, to) {
   };
 }
 
+/* =========================
+   کسورات و پاداش (فاز ۷)
+========================= */
+
+const ADJ_KINDS = ['deduction', 'bonus'];
+
+function addAdjustment(db, { coachId, period, kind, amount, reason, actor }) {
+  const cid = Number(coachId);
+  const k = String(kind || '').trim();
+  const amt = clampMoney(amount);
+  if (!cid) return { ok: false, error: 'مربی نامعتبر است' };
+  if (!ADJ_KINDS.includes(k)) return { ok: false, error: 'نوع نامعتبر است (deduction یا bonus)' };
+  if (amt <= 0) return { ok: false, error: 'مبلغ باید بزرگ‌تر از صفر باشد' };
+
+  // دوره به ماه محدود می‌شود و باید در گذشته نباشد مگر برای اصلاح
+  const per = String(period || periodOf(new Date())).slice(0, 7);
+  const res = db.prepare(`
+    INSERT INTO coach_adjustments (coach_id, period, kind, amount, reason, created_by)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(cid, per, k, amt, reason ? String(reason).trim() : null, actor || null);
+
+  return { ok: true, id: Number(res.lastInsertRowid), adjustment: db.prepare('SELECT * FROM coach_adjustments WHERE id = ?').get(res.lastInsertRowid) };
+}
+
+function deleteAdjustment(db, id) {
+  const row = db.prepare('SELECT * FROM coach_adjustments WHERE id = ?').get(Number(id));
+  if (!row) return { ok: false, error: 'کسر/پاداش پیدا نشد' };
+  db.prepare('DELETE FROM coach_adjustments WHERE id = ?').run(Number(id));
+  return { ok: true, deleted: row };
+}
+
+function listAdjustments(db, coachId, period) {
+  const cid = Number(coachId);
+  if (period) {
+    return db.prepare('SELECT * FROM coach_adjustments WHERE coach_id = ? AND period = ? ORDER BY created_at DESC, id DESC')
+      .all(cid, String(period).slice(0, 7));
+  }
+  return db.prepare('SELECT * FROM coach_adjustments WHERE coach_id = ? ORDER BY period DESC, created_at DESC, id DESC').all(cid);
+}
+
+/* =========================
+   تسویه (فاز ۸)
+========================= */
+
+/**
+ * تسویه سهم‌های یک مربی در یک دوره.
+ *
+ * برخلاف نسخه قدیمی که فقط یک عدد در ماه نگه می‌داشت، اینجا هر سطر درآمد
+ * دقیقاً به یک settlement گره می‌خورد (settlement_items). نتیجه:
+ *  • تسویه جزئی دقیقاً کار می‌کند
+ *  • می‌دانیم هر ریال بابت چه جلساتی بوده
+ *  • کسورات دوره هم در تسویه لحاظ می‌شود
+ *
+ * @param {object} db
+ * @param {object} opts
+ *   coachId, period ('YYYY-MM'), from, to (تاریخ‌های جلسه),
+ *   includeAdjustments (bool, پیش‌فرض true), note, actor
+ */
+function settleCoach(db, { coachId, period, from, to, includeAdjustments = true, note, actor }) {
+  const cid = Number(coachId);
+  if (!cid) return { ok: false, error: 'مربی نامعتبر است' };
+
+  const per = String(period || periodOf(new Date())).slice(0, 7);
+  const fromDate = from || `${per}-01`;
+  const toDate = to || `${per}-31`;
+
+  const coach = db.prepare('SELECT * FROM coaches WHERE id = ?').get(cid);
+  if (!coach) return { ok: false, error: 'مربی پیدا نشد' };
+
+  // سهم‌های تسویه‌نشده در این بازه
+  const pending = db.prepare(`
+    SELECT * FROM coach_earnings
+    WHERE coach_id = ? AND settlement_id IS NULL AND earned_at BETWEEN ? AND ?
+    ORDER BY earned_at, id
+  `).all(cid, fromDate, toDate);
+
+  const gross = clampMoney(pending.reduce((s, r) => s + (Number(r.net) || 0), 0));
+
+  // کسورات و پاداش‌های دوره — فقط مواردی که قبلاً در تسویه‌ای لحاظ نشده‌اند.
+  // بدون این شرط، تسویهٔ دوم همان کسورات را دوباره کم می‌کرد.
+  let deductions = 0;
+  let bonuses = 0;
+  if (includeAdjustments) {
+    const settledPeriods = db.prepare(
+      'SELECT period FROM coach_settlements WHERE coach_id = ?'
+    ).all(cid).map((r) => r.period);
+    const alreadySettled = settledPeriods.includes(per);
+
+    const adj = db.prepare(`
+      SELECT COALESCE(SUM(CASE WHEN kind='deduction' THEN amount ELSE 0 END),0) AS d,
+             COALESCE(SUM(CASE WHEN kind='bonus'     THEN amount ELSE 0 END),0) AS b
+      FROM coach_adjustments WHERE coach_id = ? AND period = ?
+    `).get(cid, per);
+    deductions = alreadySettled ? 0 : clampMoney(adj.d);
+    bonuses = alreadySettled ? 0 : clampMoney(adj.b);
+  }
+
+  const net = clampMoney(gross + bonuses - deductions);
+
+  // حقوق ثابت: اگر مربی حقوق‌ثابت دارد و برای این دوره سطر حقوق ندارد، بساز.
+  // این کار باید «قبل» از بررسی خالی‌بودن انجام شود، وگرنه مربی حقوق‌ثابت
+  // که هیچ جلسه‌ای ندارد هرگز قابل تسویه نخواهد بود.
+  const salaryCents = clampMoney(coach.monthly_salary);
+  if ((coach.pay_model === 'fixed' || coach.pay_model === 'hybrid') && salaryCents > 0) {
+    const has = db.prepare(
+      "SELECT id FROM coach_earnings WHERE coach_id = ? AND period = ? AND source_type = 'salary'"
+    ).get(cid, per);
+    if (!has) {
+      accrueMonthlySalary(db, { coachId: cid, period: per, amount: salaryCents, actor });
+      const extra = db.prepare(`
+        SELECT * FROM coach_earnings
+        WHERE coach_id = ? AND settlement_id IS NULL AND source_type = 'salary' AND period = ?
+      `).all(cid, per);
+      for (const e of extra) pending.push(e);
+    }
+  }
+
+  if (pending.length === 0 && net === 0) {
+    return { ok: false, error: 'چیزی برای تسویه وجود ندارد' };
+  }
+
+  const finalGross = clampMoney(pending.reduce((s, r) => s + (Number(r.net) || 0), 0));
+  const finalNet = clampMoney(finalGross + bonuses - deductions);
+
+  const insSettlement = db.prepare(`
+    INSERT INTO coach_settlements (coach_id, period, period_start, period_end, amount, gross, deductions, net, item_count, note, settled_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const insItem = db.prepare('INSERT INTO settlement_items (settlement_id, earning_id, amount) VALUES (?, ?, ?)');
+  const markEarning = db.prepare('UPDATE coach_earnings SET settlement_id = ? WHERE id = ?');
+
+  let settlementId = 0;
+  const run = db.transaction(() => {
+    const res = insSettlement.run(
+      cid, per, fromDate, toDate,
+      finalNet, finalGross, deductions, finalNet,
+      pending.length, note ? String(note).trim() : null, actor || null
+    );
+    settlementId = Number(res.lastInsertRowid);
+    for (const e of pending) {
+      insItem.run(settlementId, e.id, Number(e.net) || 0);
+      markEarning.run(settlementId, e.id);
+    }
+  });
+  run();
+
+  return {
+    ok: true,
+    settlement_id: settlementId,
+    items: pending.length,
+    gross: finalGross,
+    deductions,
+    bonuses,
+    net: finalNet,
+    settlement: db.prepare('SELECT * FROM coach_settlements WHERE id = ?').get(settlementId),
+  };
+}
+
+/** ریز یک تسویه (کدام جلسات پرداخت شد) */
+function settlementDetail(db, settlementId) {
+  const s = db.prepare('SELECT * FROM coach_settlements WHERE id = ?').get(Number(settlementId));
+  if (!s) return null;
+  const coach = db.prepare('SELECT id, name, phone FROM coaches WHERE id = ?').get(s.coach_id);
+  const items = db.prepare(`
+    SELECT si.amount, e.*
+    FROM settlement_items si
+    JOIN coach_earnings e ON e.id = si.earning_id
+    WHERE si.settlement_id = ?
+    ORDER BY e.earned_at, e.id
+  `).all(Number(settlementId));
+  const adjustments = db.prepare(
+    'SELECT * FROM coach_adjustments WHERE coach_id = ? AND period = ? ORDER BY id'
+  ).all(s.coach_id, s.period);
+  return { settlement: s, coach, items, adjustments };
+}
+
+/** حذف تسویه (برگرداندن سهم‌ها به وضعیت تسویه‌نشده) */
+function cancelSettlement(db, settlementId, actor) {
+  const s = db.prepare('SELECT * FROM coach_settlements WHERE id = ?').get(Number(settlementId));
+  if (!s) return { ok: false, error: 'تسویه پیدا نشد' };
+  const unmark = db.prepare('UPDATE coach_earnings SET settlement_id = NULL WHERE settlement_id = ?');
+  const delItems = db.prepare('DELETE FROM settlement_items WHERE settlement_id = ?');
+  const delSettlement = db.prepare('DELETE FROM coach_settlements WHERE id = ?');
+  const run = db.transaction(() => {
+    unmark.run(Number(settlementId));
+    delItems.run(Number(settlementId));
+    delSettlement.run(Number(settlementId));
+  });
+  run();
+  return { ok: true, cancelled: s };
+}
+
+/* =========================
+   گزارش‌ها (فاز ۹)
+========================= */
+
+/** داشبورد سودآوری مربیان — هر مربی چقدر آورد و چقدر برد */
+function coachProfitability(db, from, to) {
+  const coaches = db.prepare('SELECT * FROM coaches WHERE is_active = 1 ORDER BY name').all();
+  const revenue = db.prepare(`
+    SELECT coach_id, COALESCE(SUM(gross_revenue),0) AS revenue,
+           COALESCE(SUM(coach_share),0) AS coach_share,
+           COALESCE(SUM(gym_share),0) AS gym_share,
+           COUNT(*) AS sessions
+    FROM session_revenue WHERE occurred_at BETWEEN ? AND ?
+    GROUP BY coach_id
+  `).all(from, to);
+
+  const revByCoach = new Map(revenue.map((r) => [r.coach_id, r]));
+
+  return coaches.map((c) => {
+    const sum = summarizeCoach(db, c.id, from, to);
+    const rev = revByCoach.get(c.id) || {};
+    const revenueTotal = clampMoney(rev.revenue);
+    const gymTotal = clampMoney(rev.gym_share);
+    return {
+      id: c.id,
+      name: c.name,
+      phone: c.phone,
+      pay_model: c.pay_model,
+      monthly_salary: c.monthly_salary,
+      can_private: !!c.can_private,
+      can_program: !!c.can_program,
+      sports: db.prepare('SELECT sport FROM coach_sports WHERE coach_id = ?').all(c.id).map((r) => r.sport),
+      // سهم مربی (بدهی باشگاه)
+      session_total: sum.session_total,
+      salary_total: sum.salary_total,
+      gross: sum.gross,
+      deductions: sum.deductions,
+      bonuses: sum.adjustments_bonus,
+      net: sum.net,
+      settled: sum.settled,
+      remaining: sum.remaining,
+      // درآمد و سهم باشگاه (اگر gym_percent تعریف شده باشد)
+      sessions: Number(rev.sessions) || 0,
+      revenue: revenueTotal,
+      gym_share: gymTotal,
+      gym_margin: clampMoney(revenueTotal - gymTotal - sum.gross),
+    };
+  });
+}
+
+/** گزارش سودآوری هر رشته */
+function sportProfitability(db, from, to) {
+  const revenue = db.prepare(`
+    SELECT sport,
+           COALESCE(SUM(gross_revenue),0) AS revenue,
+           COALESCE(SUM(coach_share),0) AS coach_share,
+           COALESCE(SUM(gym_share),0) AS gym_share,
+           COUNT(*) AS sessions
+    FROM session_revenue WHERE occurred_at BETWEEN ? AND ?
+    GROUP BY sport
+  `).all(from, to);
+  const earnings = db.prepare(`
+    SELECT sport, COALESCE(SUM(net),0) AS coach_paid, COUNT(*) AS items
+    FROM coach_earnings WHERE earned_at BETWEEN ? AND ? AND source_type = 'session'
+    GROUP BY sport
+  `).all(from, to);
+  const earnBySport = new Map(earnings.map((e) => [e.sport, e]));
+
+  return revenue.map((r) => {
+    const e = earnBySport.get(r.sport) || {};
+    const revenueTotal = clampMoney(r.revenue);
+    const coachPaid = clampMoney(e.coach_paid);
+    const gymRevenue = clampMoney(r.gym_share);
+    return {
+      sport: r.sport,
+      sessions: Number(r.sessions) || 0,
+      revenue: revenueTotal,
+      coach_share: clampMoney(r.coach_share),
+      gym_share: gymRevenue,
+      coach_paid: coachPaid,
+      // سود واقعی باشگاه = سهم باشگاه از جلسات − سهم پرداختی مربیان
+      net_profit: clampMoney(gymRevenue - coachPaid),
+    };
+  }).sort((a, b) => b.net_profit - a.net_profit);
+}
+
+/** پیش‌بینی پایان ماه بر اساس جلسات ثبت‌شده تا امروز */
+function forecastMonth(db, coachId, period) {
+  const cid = Number(coachId);
+  const per = String(period || periodOf(new Date())).slice(0, 7);
+  const toDate = isoDate();
+  const sum = summarizeCoach(db, cid, `${per}-01`, `${per}-31`);
+  const sessionSum = sum.session_total;
+
+  // میانگین روزانه = جلسات ثبت‌شده تا امروز / روزهای گذشته
+  const dayOfMonth = Number(toDate.slice(8, 10));
+  const daysInMonth = new Date(Number(per.slice(0, 4)), Number(per.slice(5, 7)), 0).getDate();
+  const perDay = dayOfMonth > 0 ? sessionSum / dayOfMonth : sessionSum;
+  const projected = clampMoney(perDay * daysInMonth);
+
+  return {
+    coach_id: cid,
+    period: per,
+    days_passed: dayOfMonth,
+    days_in_month: daysInMonth,
+    session_total: sessionSum,
+    per_day: clampMoney(perDay),
+    projected_sessions: projected,
+    // اگر جلسه‌ها ثابت باشند، تخمین کل درآمد ماه
+    projected_total: clampMoney(sum.net - sessionSum + projected),
+  };
+}
+
+/** تطبیق استفاده از پلن — چند جلسه رفته، چقدر باقی مانده */
+function planUtilization(db, memberId) {
+  const mid = Number(memberId);
+  const rows = db.prepare(`
+    SELECT ms.*, c.name AS coach_name_resolved
+    FROM member_sports ms
+    LEFT JOIN coaches c ON c.id = ms.coach_id
+    WHERE ms.member_id = ?
+  `).all(mid);
+
+  return rows.map((r) => {
+    const total = Number(r.total_sessions) || 0;
+    const used = Number(r.used_sessions) || 0;
+    const remainingSessions = Math.max(0, total - used);
+    const unit = Number(r.unit_price) || 0;
+    const tuition = Number(r.tuition_amount) || 0;
+    return {
+      sport_id: r.id,
+      sport: r.sport,
+      coach_id: r.coach_id,
+      coach_name: r.coach_name || r.coach_name_resolved,
+      class_type: r.class_type,
+      total_sessions: total,
+      used_sessions: used,
+      remaining_sessions: remainingSessions,
+      tuition_amount: tuition,
+      unit_price: unit,
+      used_value: clampMoney(used * unit),
+      remaining_value: clampMoney(remainingSessions * unit),
+      // جلسات انجام‌شده از طریق موتور سهم (تطبیق با used_sessions)
+      earned_sessions: db.prepare(
+        "SELECT COUNT(*) AS c FROM coach_earnings WHERE member_id = ? AND sport = ? AND source_type='session'"
+      ).get(mid, r.sport).c,
+      is_expired: r.expiry_date ? r.expiry_date < isoDate() : false,
+    };
+  });
+}
+
 module.exports = {
   DEFAULT_SHARE_PERCENT,
   normalizeSportName,
@@ -431,4 +891,16 @@ module.exports = {
   revokeSessionEarnings,
   accrueMonthlySalary,
   summarizeCoach,
+  setSessionSplits,
+  getSessionSplits,
+  addAdjustment,
+  deleteAdjustment,
+  listAdjustments,
+  settleCoach,
+  settlementDetail,
+  cancelSettlement,
+  coachProfitability,
+  sportProfitability,
+  forecastMonth,
+  planUtilization,
 };
