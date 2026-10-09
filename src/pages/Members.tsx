@@ -20,7 +20,13 @@ import {
   todayJalali,
   type JalaliDate,
 } from '../lib/jalaliDate';
-import { CreditCard as Edit2, Trash2, UserPlus } from 'lucide-react';
+import {
+  Pencil,
+  Trash2,
+  UserPlus,
+  Search,
+  X,
+} from 'lucide-react';
 
 interface MemberForm {
   full_name: string;
@@ -115,44 +121,30 @@ function JalaliDatePicker({
 
   return (
     <div>
-      <label className="text-xs text-gray-500 mb-1 block">{label}</label>
+      <label className="text-xs font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>
+        {label}
+      </label>
       <div className="grid grid-cols-3 gap-2">
-        <select
-          className="input-dark"
-          value={value.day}
-          onChange={(e) => update({ day: Number(e.target.value) })}
-        >
+        <select className="input-field" value={value.day} onChange={(e) => update({ day: Number(e.target.value) })}>
           {days.map((d) => (
-            <option key={d} value={d}>
-              {d}
-            </option>
+            <option key={d} value={d}>{d}</option>
           ))}
         </select>
-        <select
-          className="input-dark"
-          value={value.month}
-          onChange={(e) => update({ month: Number(e.target.value) })}
-        >
+        <select className="input-field" value={value.month} onChange={(e) => update({ month: Number(e.target.value) })}>
           {jalaliMonthNames.map((name, i) => (
-            <option key={name} value={i + 1}>
-              {name}
-            </option>
+            <option key={name} value={i + 1}>{name}</option>
           ))}
         </select>
-        <select
-          className="input-dark"
-          value={value.year}
-          onChange={(e) => update({ year: Number(e.target.value) })}
-        >
+        <select className="input-field" value={value.year} onChange={(e) => update({ year: Number(e.target.value) })}>
           {years.map((y) => (
-            <option key={y} value={y}>
-              {y}
-            </option>
+            <option key={y} value={y}>{y}</option>
           ))}
         </select>
       </div>
       {isBeforeMin && (
-        <p className="text-xs text-red-400 mt-1">تاریخ نمی‌تواند قبل از تاریخ شروع باشد</p>
+        <p className="text-xs mt-1" style={{ color: 'var(--danger)' }}>
+          تاریخ نمی‌تواند قبل از تاریخ شروع باشد
+        </p>
       )}
     </div>
   );
@@ -246,99 +238,170 @@ export default function Members() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('حذف شود؟')) return;
+    if (!confirm('آیا از حذف این عضو مطمئن هستید؟')) return;
     const { error } = await deleteMember(id);
     if (error) alert(getApiErrorMessage(error));
     else fetchMembers();
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-xl font-bold text-white">اعضا</h1>
-        <button onClick={openAdd} className="btn-gold flex items-center gap-2">
+    <div className="space-y-6 animate-fade-in">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="page-title">اعضا</h1>
+          <p className="page-subtitle">{members.length.toLocaleString('fa-IR')} عضو ثبت‌شده</p>
+        </div>
+        <button onClick={openAdd} className="btn-primary">
           <UserPlus size={16} />
           عضو جدید
         </button>
       </div>
 
-      <input
-        className="input-dark w-full"
-        placeholder="جستجو بر اساس نام یا تلفن..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-      />
+      <div className="relative">
+        <Search
+          size={16}
+          className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+          style={{ color: 'var(--text-muted)' }}
+        />
+        <input
+          className="input-field pr-10"
+          placeholder="جستجو بر اساس نام یا تلفن..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
 
-      <div className="glass-card p-4 overflow-x-auto">
+      <div className="panel-card overflow-hidden">
         {loading ? (
-          <div className="text-gray-400">در حال بارگذاری...</div>
+          <div className="p-6 space-y-3">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-12 skeleton" />
+            ))}
+          </div>
         ) : filteredMembers.length === 0 ? (
-          <div className="text-gray-400">عضوی یافت نشد</div>
+          <div className="p-12 text-center">
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>عضوی یافت نشد</p>
+          </div>
         ) : (
-          <table className="w-full text-right min-w-[640px]">
-            <thead>
-              <tr className="text-gray-400 text-sm">
-                <th className="pb-3">نام</th>
-                <th className="pb-3">تلفن</th>
-                <th className="pb-3">نوع عضویت</th>
-                <th className="pb-3">جلسات</th>
-                <th className="pb-3">پایان عضویت </th>
-                <th className="pb-3">عملیات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredMembers.map((m) => (
-                <tr key={m.id} className="border-t border-white/10 text-white">
-                  <td className="py-3">{m.full_name}</td>
-                  <td className="py-3">{m.phone}</td>
-                  <td className="py-3">{membershipLabels[m.membership_type]}</td>
-                  <td className="py-3">
-                    {m.used_sessions ?? 0} / {m.total_sessions ?? 0}
-                  </td>
-                  <td className="py-3">{formatJalali(m.end_date)}</td>
-                  <td className="py-3">
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => openEdit(m)}
-                        className="text-gray-400 hover:text-gold-400"
-                      >
-                        <Edit2 size={16} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(m.id)}
-                        className="text-gray-400 hover:text-red-400"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-right min-w-[700px]">
+              <thead>
+                <tr style={{ background: 'var(--bg-muted)' }}>
+                  {['نام', 'تلفن', 'نوع عضویت', 'جلسات', 'پایان عضویت', 'وضعیت', ''].map((h) => (
+                    <th
+                      key={h}
+                      className="px-4 py-3 text-xs font-semibold"
+                      style={{ color: 'var(--text-secondary)' }}
+                    >
+                      {h}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {filteredMembers.map((m) => {
+                  const active = m.is_active ?? (m.end_date >= new Date().toISOString().split('T')[0]);
+                  return (
+                    <tr key={m.id} className="table-row">
+                      <td className="px-4 py-3.5">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0"
+                            style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
+                          >
+                            {m.full_name?.charAt(0) || '?'}
+                          </div>
+                          <span className="text-sm font-medium" style={{ color: 'var(--text)' }}>
+                            {m.full_name}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                        {m.phone}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <span className="badge badge-info">
+                          {membershipLabels[m.membership_type]}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                        {(m.used_sessions ?? 0).toLocaleString('fa-IR')} / {(m.total_sessions ?? 0).toLocaleString('fa-IR')}
+                      </td>
+                      <td className="px-4 py-3.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                        {formatJalali(m.end_date)}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <span className={`badge ${active ? 'badge-success' : 'badge-danger'}`}>
+                          {active ? 'فعال' : 'غیرفعال'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <div className="flex gap-1 justify-end">
+                          <button
+                            type="button"
+                            onClick={() => openEdit(m)}
+                            className="p-2 rounded-lg transition-colors"
+                            style={{ color: 'var(--text-muted)' }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--accent-soft)'; e.currentTarget.style.color = 'var(--accent)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+                          >
+                            <Pencil size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(m.id)}
+                            className="p-2 rounded-lg transition-colors"
+                            style={{ color: 'var(--text-muted)' }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--danger-soft)'; e.currentTarget.style.color = 'var(--danger)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(4px)' }}
+        >
           <form
             onSubmit={handleSubmit}
-            className="glass-card p-6 w-full max-w-md space-y-3 max-h-[90vh] overflow-y-auto"
+            className="panel-card w-full max-w-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto"
           >
-            <h2 className="text-lg font-bold text-white mb-2">
-              {editing ? 'ویرایش عضو' : 'عضو جدید'}
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>
+                {editing ? 'ویرایش عضو' : 'عضو جدید'}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowModal(false)}
+                className="p-1.5 rounded-lg"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
 
             {formError && (
-              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+              <div
+                className="p-3 rounded-xl text-sm"
+                style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}
+              >
                 {formError}
               </div>
             )}
 
             <input
-              className="input-dark"
+              className="input-field"
               placeholder="نام و نام خانوادگی *"
               value={form.full_name}
               onChange={(e) => setForm({ ...form, full_name: e.target.value })}
@@ -346,39 +409,41 @@ export default function Members() {
             />
 
             <input
-              className="input-dark"
+              className="input-field"
               placeholder="تلفن *"
               value={form.phone}
               onChange={(e) => setForm({ ...form, phone: e.target.value })}
               required
             />
+
             <input
-               className="input-dark"
-               placeholder="تاریخ تولد (اختیاری - YYYY-MM-DD)"
-               value={form.birthday}
-               onChange={(e) => setForm({ ...form, birthday: e.target.value })}
-/>
+              className="input-field"
+              placeholder="تاریخ تولد (اختیاری - YYYY-MM-DD)"
+              value={form.birthday}
+              onChange={(e) => setForm({ ...form, birthday: e.target.value })}
+            />
+
             <select
-              className="input-dark"
+              className="input-field"
               value={form.membership_type}
               onChange={(e) =>
                 setForm({ ...form, membership_type: e.target.value as MembershipType })
               }
             >
               {Object.entries(membershipLabels).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
+                <option key={value} value={value}>{label}</option>
               ))}
             </select>
 
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="text-xs text-gray-500 mb-1 block">جلسات هفتگی</label>
+                <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
+                  جلسات هفتگی
+                </label>
                 <input
                   type="number"
                   min={0}
-                  className="input-dark"
+                  className="input-field"
                   value={form.weekly_sessions}
                   onChange={(e) =>
                     setForm({ ...form, weekly_sessions: Number(e.target.value) || 0 })
@@ -387,11 +452,13 @@ export default function Members() {
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-500 mb-1 block">کل جلسات</label>
+                <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
+                  کل جلسات
+                </label>
                 <input
                   type="number"
                   min={0}
-                  className="input-dark"
+                  className="input-field"
                   value={form.total_sessions}
                   onChange={(e) =>
                     setForm({ ...form, total_sessions: Number(e.target.value) || 0 })
@@ -400,12 +467,14 @@ export default function Members() {
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-500 mb-1 block">جلسات استفاده‌شده</label>
+                <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
+                  استفاده‌شده
+                </label>
                 <input
                   type="number"
                   min={0}
                   max={form.total_sessions}
-                  className="input-dark"
+                  className="input-field"
                   value={form.used_sessions}
                   onChange={(e) =>
                     setForm({ ...form, used_sessions: Number(e.target.value) || 0 })
@@ -429,22 +498,18 @@ export default function Members() {
             />
 
             <textarea
-              className="input-dark min-h-[80px]"
+              className="input-field min-h-[80px]"
               placeholder="یادداشت"
               value={form.notes}
               onChange={(e) => setForm({ ...form, notes: e.target.value })}
             />
 
             <div className="flex gap-2 pt-2">
-              <button type="submit" className="btn-gold flex-1" disabled={submitting}>
-                {submitting ? '...' : editing ? 'ذخیره' : 'ثبت'}
+              <button type="submit" className="btn-primary flex-1" disabled={submitting}>
+                {submitting ? 'در حال ذخیره...' : editing ? 'ذخیره تغییرات' : 'ثبت عضو'}
               </button>
-              <button
-                type="button"
-                className="px-4 text-gray-400 hover:text-white"
-                onClick={() => setShowModal(false)}
-              >
-                بستن
+              <button type="button" className="btn-outline" onClick={() => setShowModal(false)}>
+                انصراف
               </button>
             </div>
           </form>
