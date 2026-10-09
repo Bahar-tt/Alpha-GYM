@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ThemeProvider } from './context/ThemeContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
 import Login from './pages/Login';
@@ -21,42 +22,41 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 
 function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <Routes>
-          <Route
-            path="/login"
-            element={
-              <PublicRoute>
-                <Login />
-              </PublicRoute>
-            }
-          />
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <Layout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="dashboard"  element={<Dashboard />} />
-            <Route path="members"    element={<Members />} />
-            <Route path="renewals"   element={<Renewals />} />
-            <Route path="messaging"  element={<Messaging />} />
-
-            {/* Admin-only routes */}
-            <Route path="sms-logs"  element={<ProtectedRoute requireAdmin><SmsLogs /></ProtectedRoute>} />
-            <Route path="broadcast" element={<ProtectedRoute requireAdmin><Broadcast /></ProtectedRoute>} />
-            <Route path="coach"     element={<ProtectedRoute requireAdmin><CoachPortal /></ProtectedRoute>} />
-            <Route path="users"     element={<ProtectedRoute requireAdmin><UsersPage /></ProtectedRoute>} />
-          </Route>
-
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
-        </Routes>
-      </AuthProvider>
-    </BrowserRouter>
+    <ThemeProvider>
+      <BrowserRouter>
+        <AuthProvider>
+          <Routes>
+            <Route
+              path="/login"
+              element={
+                <PublicRoute>
+                  <Login />
+                </PublicRoute>
+              }
+            />
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <Layout />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<Navigate to="/dashboard" replace />} />
+              <Route path="dashboard" element={<Dashboard />} />
+              <Route path="members" element={<Members />} />
+              <Route path="renewals" element={<Renewals />} />
+              <Route path="messaging" element={<Messaging />} />
+              <Route path="sms-logs" element={<ProtectedRoute requireAdmin><SmsLogs /></ProtectedRoute>} />
+              <Route path="broadcast" element={<ProtectedRoute requireAdmin><Broadcast /></ProtectedRoute>} />
+              <Route path="coach" element={<ProtectedRoute requireAdmin><CoachPortal /></ProtectedRoute>} />
+              <Route path="users" element={<ProtectedRoute requireAdmin><UsersPage /></ProtectedRoute>} />
+            </Route>
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          </Routes>
+        </AuthProvider>
+      </BrowserRouter>
+    </ThemeProvider>
   );
 }
 
