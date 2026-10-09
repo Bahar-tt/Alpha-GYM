@@ -5,7 +5,8 @@ const https    = require('https');
 const dns      = require('dns');
 const { toJalali } = require('../utils/date');
 
-const db = new Database(path.join(__dirname, '../gym.db'));
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../gym.db');
+const db = new Database(DB_PATH);
 
 /* =========================
    KAVENEGAR CONFIG
@@ -85,7 +86,6 @@ async function kavenegarSend(receptor, message) {
         try {
           const json = JSON.parse(body);
           if (json?.return?.status === 200) {
-            // ✅ جزئیات واقعی وضعیت تحویل کاوه‌نگار رو هم برمی‌گردونیم تا لاگ بشه
             const entry = json?.entries?.[0];
             resolve({
               ok: true,
@@ -102,7 +102,7 @@ async function kavenegarSend(receptor, message) {
     });
 
     req.on('error', (err) => {
-      cachedIp = null; // ✅ اگر IP کش‌شده دیگر جواب نداد، دفعه‌ی بعد دوباره resolve کن
+      cachedIp = null;
       resolve({ ok: false, error: err.message });
     });
     req.setTimeout(10000, () => { req.destroy(); resolve({ ok: false, error: 'Timeout' }); });
@@ -113,35 +113,23 @@ async function kavenegarSend(receptor, message) {
 
 /* =========================
    CORE SMS ENGINE
-   (فقط یک نسخه — نسخه‌های تکراری قبلی حذف شدند)
 ========================= */
 async function sendSMS({ member_id, name, phone, message, type = 'general' }) {
-  // ⚠️ توجه: پارامتر status دیگر از بیرون پذیرفته نمی‌شود.
-  // status همیشه از روی نتیجه‌ی واقعی ارسال به کاوه‌نگار محاسبه می‌شود
-  // (قبلاً هر جا 'mock' هاردکد شده بود، وضعیت واقعی ارسال را نادیده می‌گرفت).
   try {
-    // چک تکراری
     if (member_id && type !== 'general' && hasSentToday(member_id, type)) {
       console.log(`[SKIP DUPLICATE SMS] ${type} -> ${name}`);
       return false;
     }
 
-    // ارسال واقعی از طریق کاوه‌نگار
     const result = await kavenegarSend(phone, message);
     const status = result.ok ? 'sent' : 'failed';
 
     if (!result.ok) {
       console.error(`[SMS FAILED - ${type}] -> ${phone} | ${result.error}`);
     } else {
-      // ✅ لاگ جزئیات واقعی وضعیت تحویل (نه فقط اینکه درخواست پذیرفته شده)
       console.log(`[SMS SENT - ${type}] -> ${phone} | messageid=${result.messageid} | statustext=${result.statustext}`);
     }
 
-    // ✅ FIX: قبلاً created_at از DEFAULT جدول (datetime('now')) پر می‌شد که
-    // زمان UTC است، نه وقت تهران. چون رشته‌ی ذخیره‌شده فرمت ISO استاندارد
-    // (بدون T و Z) نداشت، فرانت‌اند هم آن را بدون تبدیل نمایش می‌داد و نتیجه
-    // ۳ ساعت و ۳۰ دقیقه عقب‌تر از ساعت واقعی نشان داده می‌شد. اینجا مستقیماً
-    // وقت تهران را در همان لحظه‌ی ثبت محاسبه و ذخیره می‌کنیم.
     db.prepare(`
       INSERT INTO sms_logs (member_id, name, phone, message, type, status, created_at)
       VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+3.5 hours'))
@@ -225,8 +213,6 @@ function sendBirthday(member) {
 }
 
 async function sendAnnouncement(members, text) {
-  // ✅ FIX: قبلاً با forEach بدون await صدا زده می‌شد که باعث ارسال همزمان
-  // (concurrent) و برخورد با rate-limit کاوه‌نگار می‌شد.
   const message = `📢 اطلاعیه باشگاه آلفا
 
 ${text}

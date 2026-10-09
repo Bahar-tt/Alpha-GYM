@@ -3,11 +3,11 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const { todayJalali } = require('../utils/date');
 const { sendBirthday, sendExpiryWarning } = require('./smsService');
-const DB_PATH = path.join(__dirname, '../gym.db');
+
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../gym.db');
 const db = new Database(DB_PATH);
 let started = false;
 
-// فاصله بین هر ارسال پیامک در کرون‌ها (میلی‌ثانیه) - قابل تنظیم از .env
 const SMS_SEND_DELAY_MS = Number(process.env.SMS_SEND_DELAY_MS) || 400;
 
 /* =========================
@@ -24,9 +24,6 @@ function delay(ms) {
 /* =========================
    BIRTHDAY CRON
 ========================= */
-// ✅ FIX: قبلاً forEach بدون await روی sendBirthday صدا زده می‌شد، یعنی همه‌ی
-// پیامک‌های تولد همزمان (concurrent) ارسال می‌شدند و باعث rate-limit/timeout
-// سمت کاوه‌نگار می‌شدند. حالا با for...of + await + delay ارسال به ترتیب انجام می‌شه.
 async function checkBirthdays() {
   const today = todayJalali();
   const [, month, day] = today.split('/');
@@ -63,14 +60,12 @@ async function checkBirthdays() {
     await delay(SMS_SEND_DELAY_MS);
   }
 
-  // ✅ لاگ خلاصه
   console.log(`[Birthday Cron SUMMARY] total=${birthdayMembers.length} success=${successCount} failed=${failureCount}`);
 }
 
 /* =========================
    EXPIRY REMINDER CRON
 ========================= */
-// ✅ FIX: همون مشکل forEach بدون await اینجا هم بود.
 async function checkExpiryReminders() {
   const today = new Date();
   const targetDates = [1, 3, 7].map((days) => {
@@ -110,7 +105,6 @@ async function checkExpiryReminders() {
     await delay(SMS_SEND_DELAY_MS);
   }
 
-  // ✅ لاگ خلاصه
   console.log(`[Expiry Cron SUMMARY] total=${members.length} success=${successCount} failed=${failureCount}`);
 }
 
@@ -122,7 +116,6 @@ function startCrons() {
   started = true;
   console.log('[CRON] Starting production cron system...');
 
-  // 🟡 Birthday check - every day 09:00
   cron.schedule('0 9 * * *', async () => {
     console.log('[CRON] Birthday check running...');
     await checkBirthdays();
@@ -130,7 +123,6 @@ function startCrons() {
     timezone: 'Asia/Tehran',
   });
 
-  // 🟡 Expiry reminder - every day 10:00
   cron.schedule('0 10 * * *', async () => {
     console.log('[CRON] Expiry reminder running...');
     await checkExpiryReminders();
