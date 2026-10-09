@@ -18,8 +18,10 @@ import {
   todayJalali,
   type JalaliDate,
 } from '../lib/jalaliDate';
+import { getMembershipStatus } from '../lib/membershipStatus';
 import JalaliDatePicker from '../components/JalaliDatePicker';
 import { Pencil, Trash2, UserPlus, Search, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 interface MemberForm {
   full_name: string;
@@ -46,14 +48,12 @@ const membershipLabels: Record<MembershipType, string> = {
 function parseBirthdayToJalali(raw: string): JalaliDate | null {
   if (!raw || !raw.trim()) return null;
   const s = raw.trim();
-  // Jalali: 1403/01/15 or 1403-01-15
   if (s.includes('/') || (s.includes('-') && s.startsWith('13'))) {
     const parts = s.split(/[/-]/).map(Number);
     if (parts.length === 3 && parts[0] > 1200 && parts[1] >= 1 && parts[1] <= 12 && parts[2] >= 1) {
       return { year: parts[0], month: parts[1], day: parts[2] };
     }
   }
-  // Gregorian ISO
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
     try {
       return gregorianToJalali(s);
@@ -66,7 +66,6 @@ function parseBirthdayToJalali(raw: string): JalaliDate | null {
 
 function birthdayToStorage(d: JalaliDate | null): string {
   if (!d) return '';
-  // کرون تولد با split('/') ماه و روز شمسی را می‌خواند
   return `${d.year}/${String(d.month).padStart(2, '0')}/${String(d.day).padStart(2, '0')}`;
 }
 
@@ -114,6 +113,24 @@ function toMemberPayload(form: MemberForm): MemberFormPayload {
     birthday: birthdayToStorage(form.birthday_jalali),
     notes: form.notes.trim(),
   };
+}
+
+function StatusBadge({ endDate }: { endDate: string }) {
+  const st = getMembershipStatus(endDate);
+  if (st.kind === 'active') {
+    return <span className="badge badge-success">{st.label}</span>;
+  }
+  if (st.kind === 'expiring_soon') {
+    return <span className="badge badge-danger">{st.label}</span>;
+  }
+  if (st.kind === 'expired') {
+    return (
+      <Link to="/renewals" className="badge badge-danger hover:opacity-90">
+        {st.label}
+      </Link>
+    );
+  }
+  return <span className="badge badge-warning">{st.label}</span>;
 }
 
 export default function Members() {
@@ -177,18 +194,14 @@ export default function Members() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
-
     const validationError = validateForm(form);
     if (validationError) {
       setFormError(validationError);
       return;
     }
-
     setSubmitting(true);
-
     try {
       const payload = toMemberPayload(form);
-
       if (editing) {
         const { error } = await updateMember(editing.id, payload);
         if (error) throw error;
@@ -196,13 +209,11 @@ export default function Members() {
         const { error } = await addMember(payload);
         if (error) throw error;
       }
-
       setShowModal(false);
       setForm(emptyForm);
       setEditing(null);
       await fetchMembers();
     } catch (err: unknown) {
-      console.error('Member submit error:', err);
       setFormError(getApiErrorMessage(err));
     } finally {
       setSubmitting(false);
@@ -216,7 +227,6 @@ export default function Members() {
     else fetchMembers();
   };
 
-  // وقتی نوع عضویت عوض شد، تاریخ پایان را پیشنهاد بده
   const onMembershipTypeChange = (type: MembershipType) => {
     const months = type === 'monthly' ? 1 : type === 'quarterly' ? 3 : type === 'yearly' ? 12 : 1;
     setForm((f) => ({
@@ -266,7 +276,7 @@ export default function Members() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-right min-w-[700px]">
+            <table className="w-full text-right min-w-[780px]">
               <thead>
                 <tr style={{ background: 'var(--bg-muted)' }}>
                   {['نام', 'تلفن', 'نوع عضویت', 'جلسات', 'پایان عضویت', 'وضعیت', ''].map((h) => (
@@ -282,15 +292,24 @@ export default function Members() {
               </thead>
               <tbody>
                 {filteredMembers.map((m) => {
-                  const active =
-                    m.is_active ?? m.end_date >= new Date().toISOString().split('T')[0];
+                  const st = getMembershipStatus(m.end_date);
+                  const rowClass =
+                    st.kind === 'expired'
+                      ? 'table-row row-expired'
+                      : st.kind === 'expiring_soon'
+                        ? 'table-row row-expiring'
+                        : 'table-row';
                   return (
-                    <tr key={m.id} className="table-row">
+                    <tr key={m.id} className={rowClass}>
                       <td className="px-4 py-3.5">
                         <div className="flex items-center gap-3">
                           <div
                             className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0"
-                            style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
+                            style={{
+                              background:
+                                st.kind === 'active' ? 'var(--accent-soft)' : 'var(--danger-soft)',
+                              color: st.kind === 'active' ? 'var(--accent)' : 'var(--danger)',
+                            }}
                           >
                             {m.full_name?.charAt(0) || '?'}
                           </div>
@@ -309,13 +328,17 @@ export default function Members() {
                         {(m.used_sessions ?? 0).toLocaleString('fa-IR')} /{' '}
                         {(m.total_sessions ?? 0).toLocaleString('fa-IR')}
                       </td>
-                      <td className="px-4 py-3.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                      <td
+                        className="px-4 py-3.5 text-sm font-medium"
+                        style={{
+                          color:
+                            st.kind === 'active' ? 'var(--text-secondary)' : 'var(--danger)',
+                        }}
+                      >
                         {formatJalali(m.end_date)}
                       </td>
                       <td className="px-4 py-3.5">
-                        <span className={`badge ${active ? 'badge-success' : 'badge-danger'}`}>
-                          {active ? 'فعال' : 'غیرفعال'}
-                        </span>
+                        <StatusBadge endDate={m.end_date} />
                       </td>
                       <td className="px-4 py-3.5">
                         <div className="flex gap-1 justify-end">
@@ -346,7 +369,6 @@ export default function Members() {
         )}
       </div>
 
-      {/* مودال مستطیلی ثبت / ویرایش */}
       {showModal && (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center p-4"
@@ -366,7 +388,6 @@ export default function Members() {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Header */}
             <div
               className="shrink-0 px-6 py-4 flex items-center justify-between"
               style={{ borderBottom: '1px solid var(--border)' }}
@@ -389,7 +410,6 @@ export default function Members() {
               </button>
             </div>
 
-            {/* Body — شبکه افقی */}
             <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
               {formError && (
                 <div
@@ -430,15 +450,13 @@ export default function Members() {
                       dir="ltr"
                     />
                   </div>
-                  <div className="sm:col-span-1">
-                    <JalaliDatePicker
-                      label="تاریخ تولد"
-                      value={form.birthday_jalali}
-                      onChange={(birthday_jalali) => setForm({ ...form, birthday_jalali })}
-                      allowClear
-                      placeholder="اختیاری — انتخاب از تقویم"
-                    />
-                  </div>
+                  <JalaliDatePicker
+                    label="تاریخ تولد"
+                    value={form.birthday_jalali}
+                    onChange={(birthday_jalali) => setForm({ ...form, birthday_jalali })}
+                    allowClear
+                    placeholder="اختیاری — انتخاب از تقویم"
+                  />
                   <div>
                     <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
                       نوع عضویت
@@ -563,7 +581,6 @@ export default function Members() {
               </div>
             </div>
 
-            {/* Footer */}
             <div
               className="shrink-0 px-6 py-4 flex flex-row-reverse gap-3"
               style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-muted)' }}
