@@ -15,11 +15,27 @@ import UsersPage from './pages/Users';
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
-  if (loading) return null;
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}>
+        <div
+          className="w-8 h-8 border-2 rounded-full animate-spin"
+          style={{
+            borderColor: 'var(--border-strong)',
+            borderTopColor: 'var(--accent)',
+          }}
+        />
+      </div>
+    );
+  }
   if (user) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
 
+/**
+ * Layout یک‌بار mount می‌شود؛ فقط <Outlet /> با تغییر مسیر عوض می‌شود.
+ * در نتیجه سایدبار بین صفحات remount نمی‌شود و ابعاد/آیتم‌ها ثابت می‌مانند.
+ */
 function App() {
   return (
     <ThemeProvider>
@@ -34,6 +50,7 @@ function App() {
                 </PublicRoute>
               }
             />
+
             <Route
               path="/"
               element={
@@ -47,11 +64,40 @@ function App() {
               <Route path="members" element={<Members />} />
               <Route path="renewals" element={<Renewals />} />
               <Route path="messaging" element={<Messaging />} />
-              <Route path="sms-logs" element={<ProtectedRoute requireAdmin><SmsLogs /></ProtectedRoute>} />
-              <Route path="broadcast" element={<ProtectedRoute requireAdmin><Broadcast /></ProtectedRoute>} />
-              <Route path="coach" element={<ProtectedRoute requireAdmin><CoachPortal /></ProtectedRoute>} />
-              <Route path="users" element={<ProtectedRoute requireAdmin><UsersPage /></ProtectedRoute>} />
+              <Route
+                path="sms-logs"
+                element={
+                  <ProtectedRoute requireAdmin>
+                    <SmsLogs />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="broadcast"
+                element={
+                  <ProtectedRoute requireAdmin>
+                    <Broadcast />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="coach"
+                element={
+                  <ProtectedRoute requireAdmin>
+                    <CoachPortal />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="users"
+                element={
+                  <ProtectedRoute requireAdmin>
+                    <UsersPage />
+                  </ProtectedRoute>
+                }
+              />
             </Route>
+
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </AuthProvider>

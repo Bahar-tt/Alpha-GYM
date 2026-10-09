@@ -13,17 +13,23 @@ export default function ProtectedRoute({
 }: Props) {
   const { user, loading, isAdmin } = useAuth();
 
+  // لودینگ سبک — تمام‌صفحه نیست تا Layout/منو از هم نپاشد
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#050505] flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-gold-500/30 border-t-gold-500 rounded-full animate-spin" />
+      <div className="flex items-center justify-center py-24">
+        <div
+          className="w-8 h-8 border-2 rounded-full animate-spin"
+          style={{
+            borderColor: 'var(--border-strong)',
+            borderTopColor: 'var(--accent)',
+          }}
+        />
       </div>
     );
   }
 
   if (!user) return <Navigate to="/login" replace />;
 
-  // 🔐 role protection
   if (requireAdmin && !isAdmin) {
     return <Navigate to="/dashboard" replace />;
   }

@@ -20,7 +20,8 @@ import {
   ChevronLeft,
 } from 'lucide-react';
 
-const navItems = [
+/** منوی ثابت — آیتم‌ها و ترتیب در همه صفحات یکسان است */
+const NAV_ITEMS = [
   { to: '/dashboard', label: 'داشبورد', icon: LayoutDashboard, adminOnly: false },
   { to: '/members', label: 'اعضا', icon: Users, adminOnly: false },
   { to: '/renewals', label: 'تمدیدها', icon: RefreshCcw, adminOnly: false },
@@ -29,9 +30,9 @@ const navItems = [
   { to: '/broadcast', label: 'ارسال گروهی', icon: Send, adminOnly: true },
   { to: '/coach', label: 'پورتال مربی', icon: Dumbbell, adminOnly: true },
   { to: '/users', label: 'کاربران', icon: UserCog, adminOnly: true },
-];
+] as const;
 
-const pageTitles: Record<string, string> = {
+const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'داشبورد',
   '/members': 'مدیریت اعضا',
   '/renewals': 'تمدید عضویت',
@@ -42,82 +43,113 @@ const pageTitles: Record<string, string> = {
   '/users': 'مدیریت کاربران',
 };
 
+const SIDEBAR_WIDTH = 280;
+
 export default function Layout() {
   const { profile, isAdmin, signOut } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
 
-  const visibleItems = navItems.filter((item) => !item.adminOnly || isAdmin);
-  const currentTitle = pageTitles[location.pathname] || 'آلفا جیم';
+  // فیلتر فقط بر اساس نقش کاربر — نه صفحه فعلی
+  const visibleItems = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin);
+  const currentTitle = PAGE_TITLES[location.pathname] || 'آلفا جیم';
 
   return (
-    <div className="min-h-screen flex" dir="rtl" style={{ background: 'var(--bg)' }}>
-      {sidebarOpen && (
+    <div dir="rtl" className="min-h-screen" style={{ background: 'var(--bg)' }}>
+      {/* Mobile overlay */}
+      {mobileOpen && (
         <div
           className="fixed inset-0 z-40 lg:hidden"
           style={{ background: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(4px)' }}
-          onClick={() => setSidebarOpen(false)}
+          onClick={() => setMobileOpen(false)}
+          aria-hidden
         />
       )}
 
+      {/*
+        سایدبار همیشه fixed است:
+        - عرض ثابت SIDEBAR_WIDTH
+        - ارتفاع همیشه 100dvh
+        - در همه صفحات یکسان (Layout یک‌بار mount می‌شود و فقط Outlet عوض می‌شود)
+      */}
       <aside
-        className={`fixed lg:static inset-y-0 right-0 z-50 w-[280px] flex flex-col
-          transform transition-transform duration-300 lg:transform-none
-          ${sidebarOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'}`}
+        className={`fixed top-0 right-0 z-50 flex flex-col h-[100dvh]
+          transition-transform duration-300 ease-out
+          ${mobileOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'}`}
         style={{
+          width: SIDEBAR_WIDTH,
           background: 'var(--bg-sidebar)',
           borderLeft: '1px solid var(--border)',
         }}
       >
-        {/* Brand */}
-        <div className="px-5 py-5 flex items-center gap-3" style={{ borderBottom: '1px solid var(--border)' }}>
+        {/* Brand — ارتفاع ثابت */}
+        <div
+          className="h-16 shrink-0 px-5 flex items-center gap-3"
+          style={{ borderBottom: '1px solid var(--border)' }}
+        >
           <div
-            className="w-11 h-11 rounded-2xl flex items-center justify-center overflow-hidden shrink-0"
+            className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden shrink-0"
             style={{ background: 'linear-gradient(135deg, #0c8ce7, #006fc5)' }}
           >
-            <img src="/v5.png" alt="Alpha" className="w-9 h-9 object-contain" />
+            <img src="/v5.png" alt="Alpha" className="w-8 h-8 object-contain" />
           </div>
-          <div className="min-w-0">
-            <h1 className="text-base font-bold tracking-tight" style={{ color: 'var(--text)' }}>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-sm font-bold tracking-tight leading-tight" style={{ color: 'var(--text)' }}>
               Alpha GYM
             </h1>
-            <p className="text-[11px] truncate" style={{ color: 'var(--text-muted)' }}>
+            <p className="text-[10px] truncate leading-tight" style={{ color: 'var(--text-muted)' }}>
               مدیریت هوشمند باشگاه
             </p>
           </div>
           <button
-            className="lg:hidden mr-auto p-1.5 rounded-lg"
+            type="button"
+            className="lg:hidden p-1.5 rounded-lg shrink-0"
             style={{ color: 'var(--text-muted)' }}
-            onClick={() => setSidebarOpen(false)}
+            onClick={() => setMobileOpen(false)}
+            aria-label="بستن منو"
           >
             <X size={18} />
           </button>
         </div>
 
-        {/* Nav */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
-          <p className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+        {/* Nav — لیست ثابت */}
+        <nav className="flex-1 overflow-y-auto overflow-x-hidden px-3 py-3">
+          <p
+            className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-wider"
+            style={{ color: 'var(--text-muted)' }}
+          >
             منوی اصلی
           </p>
-          {visibleItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              onClick={() => setSidebarOpen(false)}
-              className={({ isActive }) => (isActive ? 'nav-item-active' : 'nav-item')}
-            >
-              <item.icon size={18} strokeWidth={2} />
-              <span>{item.label}</span>
-            </NavLink>
-          ))}
+          <ul className="space-y-0.5">
+            {visibleItems.map((item) => (
+              <li key={item.to}>
+                <NavLink
+                  to={item.to}
+                  end={item.to === '/dashboard'}
+                  onClick={() => setMobileOpen(false)}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 h-11 px-3.5 rounded-xl text-sm font-medium transition-colors duration-150 ${
+                      isActive ? 'nav-item-active' : 'nav-item'
+                    }`
+                  }
+                >
+                  <item.icon size={18} strokeWidth={2} className="shrink-0" />
+                  <span className="truncate">{item.label}</span>
+                </NavLink>
+              </li>
+            ))}
+          </ul>
         </nav>
 
-        {/* User footer */}
-        <div className="p-4" style={{ borderTop: '1px solid var(--border)' }}>
+        {/* User footer — ارتفاع ثابت */}
+        <div
+          className="shrink-0 p-4"
+          style={{ borderTop: '1px solid var(--border)' }}
+        >
           <div className="flex items-center gap-3 mb-3">
             <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold text-white shrink-0"
+              className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold text-white shrink-0"
               style={{ background: 'linear-gradient(135deg, #d4a843, #b8862a)' }}
             >
               {profile?.full_name?.charAt(0) || 'A'}
@@ -126,14 +158,15 @@ export default function Layout() {
               <p className="text-sm font-semibold truncate" style={{ color: 'var(--text)' }}>
                 {profile?.full_name || 'کاربر'}
               </p>
-              <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+              <p className="text-[11px] truncate" style={{ color: 'var(--text-muted)' }}>
                 {roleLabel(profile?.role)}
               </p>
             </div>
           </div>
           <button
+            type="button"
             onClick={signOut}
-            className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-xl transition-colors"
+            className="flex items-center gap-2 w-full h-10 px-3 text-sm rounded-xl transition-colors"
             style={{ color: 'var(--text-secondary)' }}
             onMouseEnter={(e) => {
               e.currentTarget.style.background = 'var(--danger-soft)';
@@ -144,62 +177,92 @@ export default function Layout() {
               e.currentTarget.style.color = 'var(--text-secondary)';
             }}
           >
-            <LogOut size={16} />
+            <LogOut size={16} className="shrink-0" />
             خروج از حساب
           </button>
         </div>
       </aside>
 
-      {/* Main */}
-      <div className="flex-1 flex flex-col min-w-0 min-h-screen">
-        <header
-          className="sticky top-0 z-30 px-4 sm:px-6 py-3.5 flex items-center justify-between gap-3"
+      {/* محتوای اصلی — همیشه margin ثابت برای جای سایدبار دسکتاپ */}
+      <div
+        className="flex flex-col min-h-screen min-w-0"
+        style={{
+          // در RTL سایدبار سمت راست است → padding/margin راست روی دسکتاپ
+        }}
+      >
+        <div
+          className="flex flex-col min-h-screen min-w-0 w-full"
           style={{
-            background: 'color-mix(in srgb, var(--bg) 85%, transparent)',
-            backdropFilter: 'blur(12px)',
-            borderBottom: '1px solid var(--border)',
+            // lg و بالاتر: فضای سایدبار را رزرو کن تا محتوا زیر منو نرود
           }}
         >
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="lg:hidden p-2 rounded-xl"
-              style={{ color: 'var(--text-secondary)', background: 'var(--bg-muted)' }}
-            >
-              <Menu size={20} />
-            </button>
-            <div className="hidden sm:flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-muted)' }}>
-              <span>آلفا جیم</span>
-              <ChevronLeft size={12} />
-              <span className="font-medium" style={{ color: 'var(--text)' }}>{currentTitle}</span>
-            </div>
-            <h2 className="sm:hidden text-sm font-semibold" style={{ color: 'var(--text)' }}>
-              {currentTitle}
-            </h2>
-          </div>
+          <style>{`
+            @media (min-width: 1024px) {
+              .alpha-main-shell {
+                margin-right: ${SIDEBAR_WIDTH}px;
+                width: calc(100% - ${SIDEBAR_WIDTH}px);
+              }
+            }
+          `}</style>
 
-          <div className="flex items-center gap-2">
-            <div
-              className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium"
-              style={{ background: 'var(--success-soft)', color: 'var(--success)' }}
+          <div className="alpha-main-shell flex flex-col min-h-screen min-w-0">
+            {/* Header ثابت */}
+            <header
+              className="sticky top-0 z-30 h-16 shrink-0 px-4 sm:px-6 flex items-center justify-between gap-3"
+              style={{
+                background: 'color-mix(in srgb, var(--bg) 88%, transparent)',
+                backdropFilter: 'blur(12px)',
+                borderBottom: '1px solid var(--border)',
+              }}
             >
-              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--success)' }} />
-              سیستم فعال
-            </div>
-            <button
-              onClick={toggleTheme}
-              className="p-2.5 rounded-xl transition-colors"
-              style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}
-              title={theme === 'light' ? 'حالت تاریک' : 'حالت روشن'}
-            >
-              {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
-            </button>
-          </div>
-        </header>
+              <div className="flex items-center gap-3 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setMobileOpen(true)}
+                  className="lg:hidden p-2 rounded-xl shrink-0"
+                  style={{ color: 'var(--text-secondary)', background: 'var(--bg-muted)' }}
+                  aria-label="باز کردن منو"
+                >
+                  <Menu size={20} />
+                </button>
+                <div className="hidden sm:flex items-center gap-1.5 text-xs min-w-0" style={{ color: 'var(--text-muted)' }}>
+                  <span className="shrink-0">آلفا جیم</span>
+                  <ChevronLeft size={12} className="shrink-0" />
+                  <span className="font-medium truncate" style={{ color: 'var(--text)' }}>
+                    {currentTitle}
+                  </span>
+                </div>
+                <h2 className="sm:hidden text-sm font-semibold truncate" style={{ color: 'var(--text)' }}>
+                  {currentTitle}
+                </h2>
+              </div>
 
-        <main className="flex-1 p-4 sm:p-6 lg:p-8">
-          <Outlet />
-        </main>
+              <div className="flex items-center gap-2 shrink-0">
+                <div
+                  className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium"
+                  style={{ background: 'var(--success-soft)', color: 'var(--success)' }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--success)' }} />
+                  سیستم فعال
+                </div>
+                <button
+                  type="button"
+                  onClick={toggleTheme}
+                  className="p-2.5 rounded-xl transition-colors"
+                  style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}
+                  title={theme === 'light' ? 'حالت تاریک' : 'حالت روشن'}
+                >
+                  {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+                </button>
+              </div>
+            </header>
+
+            {/* فقط این بخش با تغییر صفحه عوض می‌شود */}
+            <main className="flex-1 p-4 sm:p-6 lg:p-8">
+              <Outlet />
+            </main>
+          </div>
+        </div>
       </div>
     </div>
   );
