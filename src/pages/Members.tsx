@@ -13,20 +13,13 @@ import {
   addJalaliMonths,
   compareJalali,
   formatJalali,
-  jalaliDaysInMonth,
-  jalaliMonthNames,
   jalaliToGregorianIso,
   gregorianToJalali,
   todayJalali,
   type JalaliDate,
 } from '../lib/jalaliDate';
-import {
-  Pencil,
-  Trash2,
-  UserPlus,
-  Search,
-  X,
-} from 'lucide-react';
+import JalaliDatePicker from '../components/JalaliDatePicker';
+import { Pencil, Trash2, UserPlus, Search, X } from 'lucide-react';
 
 interface MemberForm {
   full_name: string;
@@ -37,7 +30,7 @@ interface MemberForm {
   used_sessions: number;
   start_date_jalali: JalaliDate;
   end_date_jalali: JalaliDate;
-  birthday: string;
+  birthday_jalali: JalaliDate | null;
   notes: string;
 }
 
@@ -49,6 +42,33 @@ const membershipLabels: Record<MembershipType, string> = {
   yearly: 'سالانه',
   vip: 'VIP',
 };
+
+function parseBirthdayToJalali(raw: string): JalaliDate | null {
+  if (!raw || !raw.trim()) return null;
+  const s = raw.trim();
+  // Jalali: 1403/01/15 or 1403-01-15
+  if (s.includes('/') || (s.includes('-') && s.startsWith('13'))) {
+    const parts = s.split(/[/-]/).map(Number);
+    if (parts.length === 3 && parts[0] > 1200 && parts[1] >= 1 && parts[1] <= 12 && parts[2] >= 1) {
+      return { year: parts[0], month: parts[1], day: parts[2] };
+    }
+  }
+  // Gregorian ISO
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    try {
+      return gregorianToJalali(s);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function birthdayToStorage(d: JalaliDate | null): string {
+  if (!d) return '';
+  // کرون تولد با split('/') ماه و روز شمسی را می‌خواند
+  return `${d.year}/${String(d.month).padStart(2, '0')}/${String(d.day).padStart(2, '0')}`;
+}
 
 const defaultStart = todayJalali();
 const defaultEnd = addJalaliMonths(defaultStart, 1);
@@ -62,7 +82,7 @@ const emptyForm: MemberForm = {
   used_sessions: 0,
   start_date_jalali: defaultStart,
   end_date_jalali: defaultEnd,
-  birthday: '',
+  birthday_jalali: null,
   notes: '',
 };
 
@@ -91,63 +111,9 @@ function toMemberPayload(form: MemberForm): MemberFormPayload {
     used_sessions: form.used_sessions,
     start_date: jalaliToGregorianIso(form.start_date_jalali),
     end_date: jalaliToGregorianIso(form.end_date_jalali),
-    birthday: form.birthday,
+    birthday: birthdayToStorage(form.birthday_jalali),
     notes: form.notes.trim(),
   };
-}
-
-function JalaliDatePicker({
-  label,
-  value,
-  onChange,
-  min,
-}: {
-  label: string;
-  value: JalaliDate;
-  onChange: (date: JalaliDate) => void;
-  min?: JalaliDate;
-}) {
-  const years = Array.from({ length: 21 }, (_, i) => todayJalali().year - 5 + i);
-  const maxDay = jalaliDaysInMonth(value.year, value.month);
-  const days = Array.from({ length: maxDay }, (_, i) => i + 1);
-
-  const update = (patch: Partial<JalaliDate>) => {
-    const next = { ...value, ...patch };
-    const cappedDay = Math.min(next.day, jalaliDaysInMonth(next.year, next.month));
-    onChange({ ...next, day: cappedDay });
-  };
-
-  const isBeforeMin = min && compareJalali(value, min) < 0;
-
-  return (
-    <div>
-      <label className="text-xs font-medium mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>
-        {label}
-      </label>
-      <div className="grid grid-cols-3 gap-2">
-        <select className="input-field" value={value.day} onChange={(e) => update({ day: Number(e.target.value) })}>
-          {days.map((d) => (
-            <option key={d} value={d}>{d}</option>
-          ))}
-        </select>
-        <select className="input-field" value={value.month} onChange={(e) => update({ month: Number(e.target.value) })}>
-          {jalaliMonthNames.map((name, i) => (
-            <option key={name} value={i + 1}>{name}</option>
-          ))}
-        </select>
-        <select className="input-field" value={value.year} onChange={(e) => update({ year: Number(e.target.value) })}>
-          {years.map((y) => (
-            <option key={y} value={y}>{y}</option>
-          ))}
-        </select>
-      </div>
-      {isBeforeMin && (
-        <p className="text-xs mt-1" style={{ color: 'var(--danger)' }}>
-          تاریخ نمی‌تواند قبل از تاریخ شروع باشد
-        </p>
-      )}
-    </div>
-  );
 }
 
 export default function Members() {
@@ -178,8 +144,14 @@ export default function Members() {
   });
 
   const openAdd = () => {
+    const start = todayJalali();
     setEditing(null);
-    setForm(emptyForm);
+    setForm({
+      ...emptyForm,
+      start_date_jalali: start,
+      end_date_jalali: addJalaliMonths(start, 1),
+      birthday_jalali: null,
+    });
     setFormError('');
     setShowModal(true);
   };
@@ -195,7 +167,7 @@ export default function Members() {
       used_sessions: member.used_sessions ?? 0,
       start_date_jalali: gregorianToJalali(member.start_date),
       end_date_jalali: gregorianToJalali(member.end_date),
-      birthday: member.birthday ?? '',
+      birthday_jalali: parseBirthdayToJalali(member.birthday ?? ''),
       notes: member.notes ?? '',
     });
     setFormError('');
@@ -244,14 +216,24 @@ export default function Members() {
     else fetchMembers();
   };
 
+  // وقتی نوع عضویت عوض شد، تاریخ پایان را پیشنهاد بده
+  const onMembershipTypeChange = (type: MembershipType) => {
+    const months = type === 'monthly' ? 1 : type === 'quarterly' ? 3 : type === 'yearly' ? 12 : 1;
+    setForm((f) => ({
+      ...f,
+      membership_type: type,
+      end_date_jalali: addJalaliMonths(f.start_date_jalali, months),
+    }));
+  };
+
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="page-title">اعضا</h1>
           <p className="page-subtitle">{members.length.toLocaleString('fa-IR')} عضو ثبت‌شده</p>
         </div>
-        <button onClick={openAdd} className="btn-primary">
+        <button type="button" onClick={openAdd} className="btn-primary">
           <UserPlus size={16} />
           عضو جدید
         </button>
@@ -289,7 +271,7 @@ export default function Members() {
                 <tr style={{ background: 'var(--bg-muted)' }}>
                   {['نام', 'تلفن', 'نوع عضویت', 'جلسات', 'پایان عضویت', 'وضعیت', ''].map((h) => (
                     <th
-                      key={h}
+                      key={h || 'actions'}
                       className="px-4 py-3 text-xs font-semibold"
                       style={{ color: 'var(--text-secondary)' }}
                     >
@@ -300,7 +282,8 @@ export default function Members() {
               </thead>
               <tbody>
                 {filteredMembers.map((m) => {
-                  const active = m.is_active ?? (m.end_date >= new Date().toISOString().split('T')[0]);
+                  const active =
+                    m.is_active ?? m.end_date >= new Date().toISOString().split('T')[0];
                   return (
                     <tr key={m.id} className="table-row">
                       <td className="px-4 py-3.5">
@@ -320,12 +303,11 @@ export default function Members() {
                         {m.phone}
                       </td>
                       <td className="px-4 py-3.5">
-                        <span className="badge badge-info">
-                          {membershipLabels[m.membership_type]}
-                        </span>
+                        <span className="badge badge-info">{membershipLabels[m.membership_type]}</span>
                       </td>
                       <td className="px-4 py-3.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
-                        {(m.used_sessions ?? 0).toLocaleString('fa-IR')} / {(m.total_sessions ?? 0).toLocaleString('fa-IR')}
+                        {(m.used_sessions ?? 0).toLocaleString('fa-IR')} /{' '}
+                        {(m.total_sessions ?? 0).toLocaleString('fa-IR')}
                       </td>
                       <td className="px-4 py-3.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
                         {formatJalali(m.end_date)}
@@ -340,20 +322,16 @@ export default function Members() {
                           <button
                             type="button"
                             onClick={() => openEdit(m)}
-                            className="p-2 rounded-lg transition-colors"
+                            className="p-2 rounded-lg"
                             style={{ color: 'var(--text-muted)' }}
-                            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--accent-soft)'; e.currentTarget.style.color = 'var(--accent)'; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; }}
                           >
                             <Pencil size={15} />
                           </button>
                           <button
                             type="button"
                             onClick={() => handleDelete(m.id)}
-                            className="p-2 rounded-lg transition-colors"
+                            className="p-2 rounded-lg"
                             style={{ color: 'var(--text-muted)' }}
-                            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--danger-soft)'; e.currentTarget.style.color = 'var(--danger)'; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; }}
                           >
                             <Trash2 size={15} />
                           </button>
@@ -368,144 +346,229 @@ export default function Members() {
         )}
       </div>
 
+      {/* مودال مستطیلی ثبت / ویرایش */}
       {showModal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4"
           style={{ background: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(4px)' }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowModal(false);
+          }}
         >
           <form
             onSubmit={handleSubmit}
-            className="panel-card w-full max-w-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto"
+            className="w-full max-w-3xl rounded-2xl overflow-hidden flex flex-col"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border)',
+              boxShadow: 'var(--shadow)',
+              maxHeight: '92vh',
+            }}
+            onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>
-                {editing ? 'ویرایش عضو' : 'عضو جدید'}
-              </h2>
+            {/* Header */}
+            <div
+              className="shrink-0 px-6 py-4 flex items-center justify-between"
+              style={{ borderBottom: '1px solid var(--border)' }}
+            >
+              <div>
+                <h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>
+                  {editing ? 'ویرایش عضو' : 'ثبت عضو جدید'}
+                </h2>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                  اطلاعات را کامل کنید و ذخیره را بزنید
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => setShowModal(false)}
-                className="p-1.5 rounded-lg"
-                style={{ color: 'var(--text-muted)' }}
+                className="p-2 rounded-xl"
+                style={{ background: 'var(--bg-muted)', color: 'var(--text-muted)' }}
               >
                 <X size={18} />
               </button>
             </div>
 
-            {formError && (
-              <div
-                className="p-3 rounded-xl text-sm"
-                style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}
-              >
-                {formError}
-              </div>
-            )}
+            {/* Body — شبکه افقی */}
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+              {formError && (
+                <div
+                  className="p-3 rounded-xl text-sm"
+                  style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}
+                >
+                  {formError}
+                </div>
+              )}
 
-            <input
-              className="input-field"
-              placeholder="نام و نام خانوادگی *"
-              value={form.full_name}
-              onChange={(e) => setForm({ ...form, full_name: e.target.value })}
-              required
-            />
+              <section>
+                <p className="text-xs font-semibold mb-3" style={{ color: 'var(--text-muted)' }}>
+                  اطلاعات فردی
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+                      نام و نام خانوادگی <span style={{ color: 'var(--danger)' }}>*</span>
+                    </label>
+                    <input
+                      className="input-field"
+                      placeholder="مثال: علی رضایی"
+                      value={form.full_name}
+                      onChange={(e) => setForm({ ...form, full_name: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+                      شماره موبایل <span style={{ color: 'var(--danger)' }}>*</span>
+                    </label>
+                    <input
+                      className="input-field"
+                      placeholder="09xxxxxxxxx"
+                      value={form.phone}
+                      onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                      required
+                      dir="ltr"
+                    />
+                  </div>
+                  <div className="sm:col-span-1">
+                    <JalaliDatePicker
+                      label="تاریخ تولد"
+                      value={form.birthday_jalali}
+                      onChange={(birthday_jalali) => setForm({ ...form, birthday_jalali })}
+                      allowClear
+                      placeholder="اختیاری — انتخاب از تقویم"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+                      نوع عضویت
+                    </label>
+                    <select
+                      className="input-field"
+                      value={form.membership_type}
+                      onChange={(e) => onMembershipTypeChange(e.target.value as MembershipType)}
+                    >
+                      {Object.entries(membershipLabels).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </section>
 
-            <input
-              className="input-field"
-              placeholder="تلفن *"
-              value={form.phone}
-              onChange={(e) => setForm({ ...form, phone: e.target.value })}
-              required
-            />
+              <section>
+                <p className="text-xs font-semibold mb-3" style={{ color: 'var(--text-muted)' }}>
+                  بازه عضویت (شمسی)
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <JalaliDatePicker
+                    label="تاریخ شروع"
+                    value={form.start_date_jalali}
+                    required
+                    onChange={(start_date_jalali) => {
+                      if (!start_date_jalali) return;
+                      setForm((f) => {
+                        const months =
+                          f.membership_type === 'monthly'
+                            ? 1
+                            : f.membership_type === 'quarterly'
+                              ? 3
+                              : f.membership_type === 'yearly'
+                                ? 12
+                                : 1;
+                        return {
+                          ...f,
+                          start_date_jalali,
+                          end_date_jalali: addJalaliMonths(start_date_jalali, months),
+                        };
+                      });
+                    }}
+                  />
+                  <JalaliDatePicker
+                    label="تاریخ پایان"
+                    value={form.end_date_jalali}
+                    required
+                    min={form.start_date_jalali}
+                    onChange={(end_date_jalali) => {
+                      if (!end_date_jalali) return;
+                      setForm({ ...form, end_date_jalali });
+                    }}
+                  />
+                </div>
+              </section>
 
-            <input
-              className="input-field"
-              placeholder="تاریخ تولد (اختیاری - YYYY-MM-DD)"
-              value={form.birthday}
-              onChange={(e) => setForm({ ...form, birthday: e.target.value })}
-            />
+              <section>
+                <p className="text-xs font-semibold mb-3" style={{ color: 'var(--text-muted)' }}>
+                  جلسات
+                </p>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+                      هفتگی
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      className="input-field"
+                      value={form.weekly_sessions}
+                      onChange={(e) =>
+                        setForm({ ...form, weekly_sessions: Number(e.target.value) || 0 })
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+                      کل جلسات
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      className="input-field"
+                      value={form.total_sessions}
+                      onChange={(e) =>
+                        setForm({ ...form, total_sessions: Number(e.target.value) || 0 })
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+                      استفاده‌شده
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={form.total_sessions}
+                      className="input-field"
+                      value={form.used_sessions}
+                      onChange={(e) =>
+                        setForm({ ...form, used_sessions: Number(e.target.value) || 0 })
+                      }
+                    />
+                  </div>
+                </div>
+              </section>
 
-            <select
-              className="input-field"
-              value={form.membership_type}
-              onChange={(e) =>
-                setForm({ ...form, membership_type: e.target.value as MembershipType })
-              }
-            >
-              {Object.entries(membershipLabels).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
-
-            <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
-                  جلسات هفتگی
+                <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+                  یادداشت
                 </label>
-                <input
-                  type="number"
-                  min={0}
-                  className="input-field"
-                  value={form.weekly_sessions}
-                  onChange={(e) =>
-                    setForm({ ...form, weekly_sessions: Number(e.target.value) || 0 })
-                  }
-                  required
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
-                  کل جلسات
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  className="input-field"
-                  value={form.total_sessions}
-                  onChange={(e) =>
-                    setForm({ ...form, total_sessions: Number(e.target.value) || 0 })
-                  }
-                  required
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
-                  استفاده‌شده
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  max={form.total_sessions}
-                  className="input-field"
-                  value={form.used_sessions}
-                  onChange={(e) =>
-                    setForm({ ...form, used_sessions: Number(e.target.value) || 0 })
-                  }
-                  required
+                <textarea
+                  className="input-field min-h-[72px]"
+                  placeholder="توضیحات اختیاری..."
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
                 />
               </div>
             </div>
 
-            <JalaliDatePicker
-              label="تاریخ شروع"
-              value={form.start_date_jalali}
-              onChange={(start_date_jalali) => setForm({ ...form, start_date_jalali })}
-            />
-
-            <JalaliDatePicker
-              label="تاریخ پایان"
-              value={form.end_date_jalali}
-              min={form.start_date_jalali}
-              onChange={(end_date_jalali) => setForm({ ...form, end_date_jalali })}
-            />
-
-            <textarea
-              className="input-field min-h-[80px]"
-              placeholder="یادداشت"
-              value={form.notes}
-              onChange={(e) => setForm({ ...form, notes: e.target.value })}
-            />
-
-            <div className="flex gap-2 pt-2">
-              <button type="submit" className="btn-primary flex-1" disabled={submitting}>
+            {/* Footer */}
+            <div
+              className="shrink-0 px-6 py-4 flex flex-row-reverse gap-3"
+              style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-muted)' }}
+            >
+              <button type="submit" className="btn-primary min-w-[140px]" disabled={submitting}>
                 {submitting ? 'در حال ذخیره...' : editing ? 'ذخیره تغییرات' : 'ثبت عضو'}
               </button>
               <button type="button" className="btn-outline" onClick={() => setShowModal(false)}>
