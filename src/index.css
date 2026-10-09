@@ -13,18 +13,18 @@
     --border: #e2e8f0;
     --border-strong: #cbd5e1;
     --text: #0f172a;
-    --text-secondary: #64748b;
-    --text-muted: #94a3b8;
+    --text-secondary: #334155;
+    --text-muted: #64748b;
     --accent: #0c8ce7;
     --accent-soft: rgba(12, 140, 231, 0.1);
-    --gold: #d4a843;
-    --gold-soft: rgba(212, 168, 67, 0.12);
-    --success: #10b981;
-    --success-soft: rgba(16, 185, 129, 0.12);
-    --warning: #f59e0b;
-    --warning-soft: rgba(245, 158, 11, 0.12);
-    --danger: #ef4444;
-    --danger-soft: rgba(239, 68, 68, 0.1);
+    --gold: #b8862a;
+    --gold-soft: rgba(184, 134, 42, 0.12);
+    --success: #059669;
+    --success-soft: rgba(5, 150, 105, 0.12);
+    --warning: #d97706;
+    --warning-soft: rgba(217, 119, 6, 0.12);
+    --danger: #dc2626;
+    --danger-soft: rgba(220, 38, 38, 0.1);
     --shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 8px 24px -8px rgba(15, 23, 42, 0.08);
     --radius: 1rem;
   }
@@ -52,8 +52,18 @@
     --shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
   }
 
+  html,
+  body,
+  button,
+  input,
+  select,
+  textarea,
+  option {
+    font-family: 'Vazirmatn', Tahoma, system-ui, sans-serif !important;
+  }
+
   * {
-    font-family: 'Vazirmatn', system-ui, sans-serif;
+    font-family: inherit;
   }
 
   html {
@@ -64,6 +74,21 @@
     background: var(--bg);
     color: var(--text);
     transition: background-color 0.25s ease, color 0.25s ease;
+  }
+
+  /* تم روشن: کلاس‌های قدیمی text-white / text-gray را اصلاح کن */
+  html:not(.dark) .text-white {
+    color: #0f172a !important;
+  }
+  html:not(.dark) .text-gray-300,
+  html:not(.dark) .text-gray-400 {
+    color: #334155 !important;
+  }
+  html:not(.dark) .text-gray-500 {
+    color: #64748b !important;
+  }
+  html:not(.dark) .placeholder\:text-gray-500::placeholder {
+    color: #94a3b8 !important;
   }
 
   ::-webkit-scrollbar {
@@ -77,9 +102,6 @@
     background: var(--border-strong);
     border-radius: 3px;
   }
-  ::-webkit-scrollbar-thumb:hover {
-    background: var(--text-muted);
-  }
 }
 
 @layer components {
@@ -88,6 +110,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
+    color: var(--text);
   }
 
   .glass-card {
@@ -95,6 +118,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
+    color: var(--text);
   }
 
   .stat-card {
@@ -103,6 +127,7 @@
     border-radius: var(--radius);
     box-shadow: var(--shadow);
     padding: 1.25rem;
+    color: var(--text);
     transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
   }
   .stat-card:hover {
@@ -115,22 +140,16 @@
     @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm
       transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none;
     background: linear-gradient(135deg, #0c8ce7, #006fc5);
-    color: #fff;
+    color: #fff !important;
     box-shadow: 0 4px 14px -4px rgba(12, 140, 231, 0.45);
-  }
-  .btn-primary:hover {
-    filter: brightness(1.06);
   }
 
   .btn-gold {
     @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm
       transition-all duration-200 active:scale-[0.98];
     background: linear-gradient(135deg, #e5ac2a, #b8862a);
-    color: #1a1200;
+    color: #1a1200 !important;
     box-shadow: 0 4px 14px -4px rgba(212, 168, 67, 0.4);
-  }
-  .btn-gold:hover {
-    filter: brightness(1.05);
   }
 
   .btn-outline {
@@ -151,8 +170,13 @@
     color: var(--gold);
     background: transparent;
   }
-  .btn-outline-gold:hover {
-    background: var(--gold-soft);
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm
+      transition-all duration-200 active:scale-[0.98];
+    background: var(--danger-soft);
+    color: var(--danger);
+    border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
   }
 
   .input-field,
@@ -162,8 +186,9 @@
     border: 1px solid var(--border);
     border-radius: 0.75rem;
     padding: 0.7rem 1rem;
-    color: var(--text);
+    color: var(--text) !important;
     font-size: 0.875rem;
+    font-family: 'Vazirmatn', Tahoma, system-ui, sans-serif !important;
     transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
   }
   .input-field::placeholder,
@@ -176,6 +201,11 @@
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-soft);
     background: var(--bg-elevated);
+  }
+  .input-field option,
+  .input-dark option {
+    color: #0f172a;
+    background: #fff;
   }
 
   .nav-item {
@@ -195,6 +225,7 @@
 
   .table-row {
     border-bottom: 1px solid var(--border);
+    color: var(--text);
     transition: background 0.15s;
   }
   .table-row:hover {
@@ -223,17 +254,25 @@
 
   .page-title {
     @apply text-2xl font-bold tracking-tight;
-    color: var(--text);
+    color: var(--text) !important;
   }
 
   .page-subtitle {
     @apply text-sm mt-1;
-    color: var(--text-secondary);
+    color: var(--text-secondary) !important;
   }
 
   .section-title {
     @apply text-base font-semibold;
-    color: var(--text);
+    color: var(--text) !important;
+  }
+
+  /* ردیف در حال انقضا */
+  .row-expiring {
+    background: color-mix(in srgb, var(--danger) 6%, transparent) !important;
+  }
+  .row-expired {
+    background: color-mix(in srgb, var(--danger) 10%, transparent) !important;
   }
 }
 
