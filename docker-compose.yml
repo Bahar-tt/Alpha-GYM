@@ -7,12 +7,13 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=8000
+      - DB_PATH=/app/data/gym.db
       - KAVENEGAR_API_KEY=${KAVENEGAR_API_KEY}
       - KAVENEGAR_SENDER=${KAVENEGAR_SENDER:-20006000853}
       - SMS_SEND_DELAY_MS=${SMS_SEND_DELAY_MS:-400}
     volumes:
-      # Persist SQLite database across restarts
-      - alpha-gym-data:/app/backend
+      # Only the SQLite database is persisted
+      - alpha-gym-data:/app/data
     restart: unless-stopped
 
 volumes:

@@ -13,9 +13,16 @@ const { startCrons } = require('./services/cronManager');
 
 const PORT = Number(process.env.PORT) || 8000;
 const ENV = process.env.NODE_ENV || 'development';
-const DB_PATH = path.join(__dirname, 'gym.db');
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'gym.db');
 
 console.log(`[ENV] Running in ${ENV}`);
+console.log(`[DB] Using database at ${DB_PATH}`);
+
+// Ensure parent directory of DB exists (important for Docker volume)
+const dbDir = path.dirname(DB_PATH);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
 
 const app = express();
 app.use(cors());
@@ -365,7 +372,6 @@ if (fs.existsSync(distPath)) {
 
   // SPA fallback — any non-API route serves index.html
   app.get('*', (req, res, next) => {
-    // Let API routes 404 normally if they didn't match
     if (req.path.startsWith('/members') ||
         req.path.startsWith('/sms') ||
         req.path.startsWith('/health')) {

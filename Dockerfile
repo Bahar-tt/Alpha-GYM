@@ -27,10 +27,10 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ \
   && rm -rf /var/lib/apt/lists/*
 
-# Install backend deps
-COPY backend/package.json backend/package-lock.json ./backend/
+# Install backend deps (npm install because lock may lag behind package.json)
+COPY backend/package.json ./backend/
 WORKDIR /app/backend
-RUN npm ci --omit=dev
+RUN npm install --omit=dev
 
 # Copy backend source
 WORKDIR /app
@@ -39,8 +39,12 @@ COPY backend/ ./backend/
 # Copy built frontend
 COPY --from=frontend-builder /app/dist ./dist
 
+# Persist SQLite here (mounted as volume)
+RUN mkdir -p /app/data
+
 ENV NODE_ENV=production
 ENV PORT=8000
+ENV DB_PATH=/app/data/gym.db
 
 EXPOSE 8000
 
