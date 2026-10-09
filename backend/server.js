@@ -1,14 +1,17 @@
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const Database = require('better-sqlite3');
 const path = require('path');
+const fs = require('fs');
 const { todayJalali } = require('./utils/date');
 const { onMemberCreated } = require('./services/eventService');
 const { sendSMS } = require('./services/smsService');
 const cron = require('node-cron');
 const { startCrons } = require('./services/cronManager');
 
-const PORT = 3001;
+const PORT = Number(process.env.PORT) || 8000;
 const ENV = process.env.NODE_ENV || 'development';
 const DB_PATH = path.join(__dirname, 'gym.db');
 
@@ -56,7 +59,6 @@ function todayIso() {
   return new Date().toISOString().split('T')[0];
 }
 
-// ✅ فاصله بین ارسال‌های broadcast (جلوگیری از rate-limit کاوه‌نگار)
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -84,12 +86,6 @@ function checkExpiredMembers() {
     console.log(`- ${m.name} (${m.phone})`);
   });
 }
-
-// ⚠️ توجه: توابع checkBirthdays و checkExpiryReminders که قبلاً اینجا تعریف
-// شده بودند، هیچ‌وقت با cron.schedule صدا زده نمی‌شدند (کد مرده / بلااستفاده).
-// منطق واقعی تولد و یادآوری انقضا در services/cronManager.js اجرا می‌شود
-// (که توسط startCrons() در پایین همین فایل فعال می‌شود). برای جلوگیری از
-// دوباره‌کاری و سردرگمی، این توابع بلااستفاده از اینجا حذف شدند.
 
 /* =========================
    CRON
@@ -150,7 +146,6 @@ app.post('/members', (req, res) => {
       .prepare('SELECT * FROM members WHERE id = ?')
       .get(result.lastInsertRowid);
 
-    // 🔥 EVENT SYSTEM
     onMemberCreated(row);
 
     res.status(201).json(row);
@@ -263,9 +258,6 @@ app.post('/sms/send', async (req, res) => {
     const normalizedPhone = String(phone).trim();
     const normalizedMessage = String(message).trim();
 
-    // ✅ FIX: قبلاً "status: 'mock'" اینجا هاردکد شده بود و صرف‌نظر از نتیجه‌ی
-    // واقعی ارسال، همیشه در دیتابیس mock ثبت می‌شد. الان status از روی نتیجه‌ی
-    // واقعی ارسال به کاوه‌نگار در خود smsService.js محاسبه می‌شود.
     const ok = await sendSMS({
       member_id: member_id != null ? Number(member_id) : null,
       name: name != null ? String(name).trim() : '',
@@ -325,7 +317,6 @@ app.post('/sms/broadcast', async (req, res) => {
     }
 
     try {
-      // ✅ FIX: status:'mock' هاردکد حذف شد + await اضافه شد
       const ok = await sendSMS({
         member_id: recipient.member_id != null ? Number(recipient.member_id) : null,
         name: recipient.name != null ? String(recipient.name).trim() : '',
@@ -350,10 +341,9 @@ app.post('/sms/broadcast', async (req, res) => {
       });
     }
 
-    await delay(SMS_SEND_DELAY_MS); // ✅ فاصله بین ارسال‌ها
+    await delay(SMS_SEND_DELAY_MS);
   }
 
-  // ✅ لاگ خلاصه
   console.log(`[SMS BROADCAST SUMMARY] total=${recipients.length} success=${successCount} failed=${failureCount}`);
 
   res.json({
@@ -365,11 +355,36 @@ app.post('/sms/broadcast', async (req, res) => {
 });
 
 /* =========================
+   STATIC FRONTEND (production / Docker)
+========================= */
+
+const distPath = path.join(__dirname, '..', 'dist');
+
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+
+  // SPA fallback — any non-API route serves index.html
+  app.get('*', (req, res, next) => {
+    // Let API routes 404 normally if they didn't match
+    if (req.path.startsWith('/members') ||
+        req.path.startsWith('/sms') ||
+        req.path.startsWith('/health')) {
+      return next();
+    }
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+
+  console.log(`[STATIC] Serving frontend from ${distPath}`);
+} else {
+  console.log('[STATIC] No dist/ folder found — API-only mode (dev)');
+}
+
+/* =========================
    START SERVER
 ========================= */
 
 startCrons();
 
-app.listen(PORT, () => {
-  console.log(`Alpha Gym API running at http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Alpha Gym running at http://0.0.0.0:${PORT}`);
 });

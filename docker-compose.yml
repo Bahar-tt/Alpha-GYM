@@ -1,0 +1,19 @@
+services:
+  alpha-gym:
+    build: .
+    container_name: alpha-gym
+    ports:
+      - "8000:8000"
+    environment:
+      - NODE_ENV=production
+      - PORT=8000
+      - KAVENEGAR_API_KEY=${KAVENEGAR_API_KEY}
+      - KAVENEGAR_SENDER=${KAVENEGAR_SENDER:-20006000853}
+      - SMS_SEND_DELAY_MS=${SMS_SEND_DELAY_MS:-400}
+    volumes:
+      # Persist SQLite database across restarts
+      - alpha-gym-data:/app/backend
+    restart: unless-stopped
+
+volumes:
+  alpha-gym-data:

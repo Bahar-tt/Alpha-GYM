@@ -9,6 +9,7 @@
   "dependencies": {
     "better-sqlite3": "^11.10.0",
     "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "jalali-moment": "^3.3.11",
     "node-cron": "^3.0.3"

@@ -1,4 +1,10 @@
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+/**
+ * When VITE_API_URL is set (even to empty string ""), use it.
+ * Empty string → relative URLs (same origin) — correct for Docker production.
+ * Unset → fall back to local backend during `npm run dev`.
+ */
+const envUrl = import.meta.env.VITE_API_URL as string | undefined;
+const API_BASE = typeof envUrl === 'string' ? envUrl : 'http://localhost:3001';
 
 export interface ApiMember {
   id: number;
