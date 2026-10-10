@@ -2,6 +2,15 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { loadJson, saveJson } from '../lib/localStore';
 import { getMembers, isMemberActive, type MemberRecord } from '../services/memberService';
+import { getCoaches, type Coach } from '../services/coachService';
+import {
+  jalaliToGregorianIso,
+  gregorianToJalali,
+  todayJalali,
+  formatJalali,
+  type JalaliDate,
+} from '../lib/jalaliDate';
+import JalaliDatePicker from '../components/JalaliDatePicker';
 import {
   Dumbbell,
   Calendar,
@@ -35,27 +44,30 @@ const sessionTypeLabels: Record<string, string> = {
 };
 
 const statusConfig = {
-  scheduled: { label: 'برنامه‌ریزی شده', color: 'text-blue-400', bg: 'bg-blue-500/10', icon: Clock },
-  completed: { label: 'تکمیل شده', color: 'text-emerald-400', bg: 'bg-emerald-500/10', icon: CheckCircle },
-  cancelled: { label: 'لغو شده', color: 'text-red-400', bg: 'bg-red-500/10', icon: XCircle },
+  scheduled: { label: 'برنامه‌ریزی شده', color: 'var(--accent)', bg: 'var(--accent-soft)', icon: Clock },
+  completed: { label: 'تکمیل شده', color: 'var(--success)', bg: 'var(--success-soft)', icon: CheckCircle },
+  cancelled: { label: 'لغو شده', color: 'var(--danger)', bg: 'var(--danger-soft)', icon: XCircle },
 };
 
 export default function CoachPortal() {
   const { profile, user } = useAuth();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [myMembers, setMyMembers] = useState<MemberRecord[]>([]);
+  const [coaches, setCoaches] = useState<Coach[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [sessionDateJalali, setSessionDateJalali] = useState<JalaliDate | null>(todayJalali());
   const [form, setForm] = useState({
     member_id: '',
-    session_date: new Date().toISOString().split('T')[0],
     session_time: '09:00',
     duration_minutes: 60,
     session_type: 'personal' as 'personal' | 'group' | 'assessment',
     notes: '',
+    coach_id: '',
   });
   const [submitting, setSubmitting] = useState(false);
   const [activeView, setActiveView] = useState<'sessions' | 'members'>('sessions');
+  const [formError, setFormError] = useState('');
 
   const isAdmin = profile?.role === 'admin';
 
@@ -65,9 +77,13 @@ export default function CoachPortal() {
 
   const fetchData = async () => {
     setLoading(true);
-    const { data: memberList } = await getMembers();
+    const [{ data: memberList }, { data: coachList }] = await Promise.all([
+      getMembers(),
+      getCoaches(),
+    ]);
     const active = (memberList || []).filter((m) => isMemberActive(m.end_date));
-    setMyMembers(isAdmin ? active : active);
+    setMyMembers(active);
+    setCoaches((coachList || []).filter((c) => c.is_active !== 0));
 
     const stored = loadJson<Session[]>(SESSIONS_KEY, []);
     const byMember = new Map((memberList || []).map((m) => [m.id, m]));
@@ -87,15 +103,38 @@ export default function CoachPortal() {
     setLoading(false);
   };
 
+  const openModal = () => {
+    setSessionDateJalali(todayJalali());
+    setForm({
+      member_id: '',
+      session_time: '09:00',
+      duration_minutes: 60,
+      session_type: 'personal',
+      notes: '',
+      coach_id: coaches[0] ? String(coaches[0].id) : '',
+    });
+    setFormError('');
+    setShowModal(true);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitting(true);
+    setFormError('');
+    if (!form.member_id) {
+      setFormError('عضو را انتخاب کنید');
+      return;
+    }
+    if (!sessionDateJalali) {
+      setFormError('تاریخ جلسه را از تقویم انتخاب کنید');
+      return;
+    }
 
+    setSubmitting(true);
     const session: Session = {
       id: String(Date.now()),
-      coach_id: user?.id || '',
+      coach_id: form.coach_id || user?.id || '',
       member_id: form.member_id,
-      session_date: form.session_date,
+      session_date: jalaliToGregorianIso(sessionDateJalali),
       session_time: form.session_time,
       duration_minutes: form.duration_minutes,
       session_type: form.session_type,
@@ -104,109 +143,74 @@ export default function CoachPortal() {
     };
     const list = loadJson<Session[]>(SESSIONS_KEY, []);
     saveJson(SESSIONS_KEY, [...list, session]);
-
     setShowModal(false);
     setSubmitting(false);
     fetchData();
   };
 
-  const updateSessionStatus = async (id: string, status: string) => {
+  const updateSessionStatus = (id: string, status: string) => {
     const list = loadJson<Session[]>(SESSIONS_KEY, []);
     saveJson(
       SESSIONS_KEY,
-      list.map((s) => (s.id === id ? { ...s, status: status as Session['status'] } : s))
+      list.map((s) => (s.id === id ? { ...s, status: status as Session['status'] } : s)),
     );
     fetchData();
   };
 
   const today = new Date().toISOString().split('T')[0];
   const todaySessions = sessions.filter((s) => s.session_date === today && s.status === 'scheduled');
-  const upcomingSessions = sessions.filter(
-    (s) => s.session_date > today && s.status === 'scheduled'
-  );
+  const upcomingSessions = sessions.filter((s) => s.session_date > today && s.status === 'scheduled');
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      {/* Header */}
+    <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3 mb-1">
-            <Dumbbell size={24} className="text-gold-400" />
-            <h1 className="text-2xl font-bold text-white">
-              {isAdmin ? 'پورتال مربیان' : 'پنل مربی'}
-            </h1>
-          </div>
-          <p className="text-gray-500 text-sm">
-            {isAdmin ? 'مدیریت مربیان و جلسات' : 'مدیریت جلسات و اعضای شما'}
-          </p>
+          <h1 className="page-title flex items-center gap-2">
+            <Dumbbell size={22} style={{ color: 'var(--accent)' }} />
+            {isAdmin ? 'پورتال مربیان' : 'پنل مربی'}
+          </h1>
+          <p className="page-subtitle">مدیریت جلسات و اعضا</p>
         </div>
-        <button onClick={() => setShowModal(true)} className="btn-gold flex items-center gap-2">
+        <button type="button" onClick={openModal} className="btn-primary">
           <Plus size={18} />
           ثبت جلسه جدید
         </button>
       </div>
 
-      {/* Quick stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <div className="stat-card">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
-              <Calendar size={20} className="text-blue-400" />
-            </div>
-            <div>
-              <p className="text-xl font-bold text-white">{todaySessions.length}</p>
-              <p className="text-xs text-gray-500">جلسه امروز</p>
-            </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: 'جلسه امروز', value: todaySessions.length, icon: Calendar },
+          { label: 'جلسه آینده', value: upcomingSessions.length, icon: Clock },
+          { label: 'اعضای فعال', value: myMembers.length, icon: Users },
+          {
+            label: 'تکمیل‌شده',
+            value: sessions.filter((s) => s.status === 'completed').length,
+            icon: CheckCircle,
+          },
+        ].map((c) => (
+          <div key={c.label} className="stat-card">
+            <c.icon size={18} style={{ color: 'var(--accent)' }} className="mb-2" />
+            <p className="text-xl font-bold" style={{ color: 'var(--text)' }}>
+              {c.value.toLocaleString('fa-IR')}
+            </p>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              {c.label}
+            </p>
           </div>
-        </div>
-        <div className="stat-card">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-gold-500/10 flex items-center justify-center">
-              <Clock size={20} className="text-gold-400" />
-            </div>
-            <div>
-              <p className="text-xl font-bold text-white">{upcomingSessions.length}</p>
-              <p className="text-xs text-gray-500">جلسه آینده</p>
-            </div>
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-              <Users size={20} className="text-emerald-400" />
-            </div>
-            <div>
-              <p className="text-xl font-bold text-white">{myMembers.length}</p>
-              <p className="text-xs text-gray-500">اعضای شما</p>
-            </div>
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center">
-              <CheckCircle size={20} className="text-amber-400" />
-            </div>
-            <div>
-              <p className="text-xl font-bold text-white">
-                {sessions.filter((s) => s.status === 'completed').length}
-              </p>
-              <p className="text-xs text-gray-500">جلسه تکمیل شده</p>
-            </div>
-          </div>
-        </div>
+        ))}
       </div>
 
-      {/* View toggle */}
-      <div className="flex items-center gap-2">
+      <div className="flex gap-2">
         {(['sessions', 'members'] as const).map((view) => (
           <button
             key={view}
+            type="button"
             onClick={() => setActiveView(view)}
-            className={`px-4 py-2 text-sm rounded-lg transition-all duration-200 ${
-              activeView === view
-                ? 'bg-gold-500/20 text-gold-400 border border-gold-500/30'
-                : 'text-gray-400 hover:text-gray-300 bg-white/5'
-            }`}
+            className="px-4 py-2 text-sm rounded-xl font-medium"
+            style={{
+              background: activeView === view ? 'var(--accent-soft)' : 'var(--bg-muted)',
+              color: activeView === view ? 'var(--accent)' : 'var(--text-secondary)',
+            }}
           >
             {view === 'sessions' ? 'جلسات' : 'اعضا'}
           </button>
@@ -214,42 +218,31 @@ export default function CoachPortal() {
       </div>
 
       {activeView === 'sessions' ? (
-        <div className="space-y-6">
-          {/* Today's Sessions */}
-          <div className="glass-card p-6">
-            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-              <Calendar size={18} className="text-gold-400" />
-              جلسات امروز
-            </h3>
+        <div className="space-y-4">
+          <div className="panel-card p-5">
+            <h3 className="section-title mb-4">جلسات امروز</h3>
             {loading ? (
-              <div className="text-center py-8">
-                <div className="w-6 h-6 border-2 border-gold-500/30 border-t-gold-500 rounded-full animate-spin mx-auto" />
-              </div>
+              <div className="h-8 skeleton" />
             ) : todaySessions.length === 0 ? (
-              <p className="text-gray-500 text-sm text-center py-8">جلسه‌ای برای امروز برنامه‌ریزی نشده</p>
+              <p className="text-sm text-center py-6" style={{ color: 'var(--text-muted)' }}>
+                جلسه‌ای برای امروز نیست
+              </p>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {todaySessions.map((s) => (
                   <SessionCard key={s.id} session={s} onUpdate={updateSessionStatus} />
                 ))}
               </div>
             )}
           </div>
-
-          {/* Upcoming Sessions */}
-          <div className="glass-card p-6">
-            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-              <Clock size={18} className="text-blue-400" />
-              جلسات آینده
-            </h3>
-            {loading ? (
-              <div className="text-center py-8">
-                <div className="w-6 h-6 border-2 border-gold-500/30 border-t-gold-500 rounded-full animate-spin mx-auto" />
-              </div>
-            ) : upcomingSessions.length === 0 ? (
-              <p className="text-gray-500 text-sm text-center py-8">جلسه آینده‌ای یافت نشد</p>
+          <div className="panel-card p-5">
+            <h3 className="section-title mb-4">جلسات آینده</h3>
+            {upcomingSessions.length === 0 ? (
+              <p className="text-sm text-center py-6" style={{ color: 'var(--text-muted)' }}>
+                جلسه آینده‌ای نیست
+              </p>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {upcomingSessions.map((s) => (
                   <SessionCard key={s.id} session={s} onUpdate={updateSessionStatus} />
                 ))}
@@ -258,82 +251,91 @@ export default function CoachPortal() {
           </div>
         </div>
       ) : (
-        /* Members view */
-        <div className="glass-card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gold-500/10">
-                  {['نام', 'تلفن', 'نوع عضویت', 'تاریخ انقضا', 'وضعیت'].map((h) => (
-                    <th key={h} className="text-right text-xs font-medium text-gray-500 px-4 py-3">
-                      {h}
-                    </th>
-                  ))}
+        <div className="panel-card overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr style={{ background: 'var(--bg-muted)' }}>
+                {['نام', 'تلفن', 'مربی', 'انقضا'].map((h) => (
+                  <th key={h} className="text-right text-xs px-4 py-3" style={{ color: 'var(--text-secondary)' }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {myMembers.map((m) => (
+                <tr key={m.id} className="table-row">
+                  <td className="px-4 py-3 text-sm" style={{ color: 'var(--text)' }}>
+                    {m.full_name}
+                  </td>
+                  <td className="px-4 py-3 text-sm" style={{ color: 'var(--text-secondary)' }} dir="ltr">
+                    {m.phone}
+                  </td>
+                  <td className="px-4 py-3 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                    {m.coach_name || '—'}
+                  </td>
+                  <td className="px-4 py-3 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                    {formatJalali(m.end_date)}
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {myMembers.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="text-center py-12 text-gray-500">
-                      عضویی یافت نشد
-                    </td>
-                  </tr>
-                ) : (
-                  myMembers.map((m) => (
-                    <tr key={m.id} className="table-row">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-gold-500/30 to-gold-700/10 flex items-center justify-center text-gold-400 text-xs font-bold">
-                            {m.full_name.charAt(0)}
-                          </div>
-                          <span className="text-sm text-white">{m.full_name}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-400">{m.phone}</td>
-                      <td className="px-4 py-3">
-                        <span className="text-xs px-2 py-1 rounded-full bg-gold-500/10 text-gold-400">
-                          {sessionTypeLabels[m.membership_type] || m.membership_type}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-400">
-                        {new Date(m.end_date).toLocaleDateString('fa-IR')}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`text-xs px-2 py-1 rounded-full ${
-                            m.is_active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
-                          }`}
-                        >
-                          {m.is_active ? 'فعال' : 'غیرفعال'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
-      {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="glass-card w-full max-w-md p-6 animate-fade-in">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-bold text-white">ثبت جلسه جدید</h2>
-              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-white transition-colors">
-                <X size={20} />
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+          style={{ background: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(4px)' }}
+          onClick={(e) => e.target === e.currentTarget && setShowModal(false)}
+        >
+          <form
+            onSubmit={handleSubmit}
+            className="w-full max-w-md rounded-2xl overflow-hidden flex flex-col"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border)',
+              boxShadow: 'var(--shadow)',
+              maxHeight: '92vh',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className="px-5 py-4 flex items-center justify-between shrink-0"
+              style={{ borderBottom: '1px solid var(--border)' }}
+            >
+              <h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>
+                ثبت جلسه جدید
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowModal(false)}
+                className="p-2 rounded-xl"
+                style={{ background: 'var(--bg-muted)', color: 'var(--text-muted)' }}
+              >
+                <X size={18} />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="px-5 py-4 space-y-4 overflow-y-auto">
+              {formError && (
+                <div
+                  className="p-3 rounded-xl text-sm"
+                  style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}
+                >
+                  {formError}
+                </div>
+              )}
+
               <div>
-                <label className="block text-sm text-gray-400 mb-1.5">انتخاب عضو</label>
+                <label className="block text-xs mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+                  عضو *
+                </label>
                 <select
+                  className="input-field"
                   value={form.member_id}
                   onChange={(e) => setForm({ ...form, member_id: e.target.value })}
-                  className="input-dark"
                   required
                 >
                   <option value="">انتخاب کنید</option>
@@ -345,127 +347,160 @@ export default function CoachPortal() {
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              {isAdmin && coaches.length > 0 && (
                 <div>
-                  <label className="block text-sm text-gray-400 mb-1.5">تاریخ</label>
-                  <input
-                    type="date"
-                    value={form.session_date}
-                    onChange={(e) => setForm({ ...form, session_date: e.target.value })}
-                    className="input-dark"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1.5">ساعت</label>
-                  <input
-                    type="time"
-                    value={form.session_time}
-                    onChange={(e) => setForm({ ...form, session_time: e.target.value })}
-                    className="input-dark"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1.5">نوع جلسه</label>
+                  <label className="block text-xs mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+                    مربی
+                  </label>
                   <select
-                    value={form.session_type}
-                    onChange={(e) => setForm({ ...form, session_type: e.target.value as any })}
-                    className="input-dark"
+                    className="input-field"
+                    value={form.coach_id}
+                    onChange={(e) => setForm({ ...form, coach_id: e.target.value })}
                   >
-                    <option value="personal">شخصی</option>
-                    <option value="group">گروهی</option>
-                    <option value="assessment">ارزیابی</option>
+                    {coaches.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.full_name}
+                      </option>
+                    ))}
                   </select>
                 </div>
+              )}
+
+              <JalaliDatePicker
+                label="تاریخ جلسه"
+                value={sessionDateJalali}
+                onChange={setSessionDateJalali}
+                required
+                placeholder="انتخاب از تقویم شمسی"
+              />
+
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm text-gray-400 mb-1.5">مدت (دقیقه)</label>
+                  <label className="block text-xs mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+                    ساعت
+                  </label>
+                  <input
+                    type="time"
+                    className="input-field"
+                    value={form.session_time}
+                    onChange={(e) => setForm({ ...form, session_time: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+                    مدت (دقیقه)
+                  </label>
                   <input
                     type="number"
+                    min={15}
+                    className="input-field"
                     value={form.duration_minutes}
-                    onChange={(e) => setForm({ ...form, duration_minutes: Number(e.target.value) })}
-                    className="input-dark"
+                    onChange={(e) =>
+                      setForm({ ...form, duration_minutes: Number(e.target.value) || 60 })
+                    }
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm text-gray-400 mb-1.5">یادداشت</label>
-                <textarea
-                  value={form.notes}
-                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                  className="input-dark h-20 resize-none"
-                />
+                <label className="block text-xs mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+                  نوع جلسه
+                </label>
+                <select
+                  className="input-field"
+                  value={form.session_type}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      session_type: e.target.value as Session['session_type'],
+                    })
+                  }
+                >
+                  <option value="personal">شخصی</option>
+                  <option value="group">گروهی</option>
+                  <option value="assessment">ارزیابی</option>
+                </select>
               </div>
 
-              <div className="flex gap-3 pt-2">
-                <button type="submit" disabled={submitting} className="btn-gold flex-1">
-                  {submitting ? 'در حال ثبت...' : 'ثبت جلسه'}
-                </button>
-                <button type="button" onClick={() => setShowModal(false)} className="btn-outline-gold">
-                  انصراف
-                </button>
+              <div>
+                <label className="block text-xs mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+                  یادداشت
+                </label>
+                <textarea
+                  className="input-field min-h-[64px]"
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                />
               </div>
-            </form>
-          </div>
+            </div>
+
+            <div
+              className="px-5 py-4 flex flex-row-reverse gap-2 shrink-0"
+              style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-muted)' }}
+            >
+              <button type="submit" className="btn-primary flex-1" disabled={submitting}>
+                {submitting ? '...' : 'ثبت جلسه'}
+              </button>
+              <button type="button" className="btn-outline" onClick={() => setShowModal(false)}>
+                انصراف
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>
   );
 }
 
-function SessionCard({ session, onUpdate }: { session: Session; onUpdate: (id: string, status: string) => void }) {
+function SessionCard({
+  session,
+  onUpdate,
+}: {
+  session: Session;
+  onUpdate: (id: string, status: string) => void;
+}) {
   const cfg = statusConfig[session.status];
   const CfgIcon = cfg.icon;
-
   return (
-    <div className="flex items-center justify-between p-4 rounded-xl bg-white/5 border border-gold-500/10 hover:border-gold-500/20 transition-all">
-      <div className="flex items-center gap-4">
-        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-gold-500/20 to-gold-600/5 flex flex-col items-center justify-center">
-          <span className="text-xs text-gold-400 font-bold">
-            {new Date(session.session_date).toLocaleDateString('fa-IR', { day: 'numeric' })}
-          </span>
-          <span className="text-[10px] text-gray-500">
-            {new Date(session.session_date).toLocaleDateString('fa-IR', { month: 'short' })}
-          </span>
+    <div
+      className="flex items-center justify-between p-3 rounded-xl"
+      style={{ background: 'var(--bg-muted)', border: '1px solid var(--border)' }}
+    >
+      <div className="flex items-center gap-3">
+        <div
+          className="w-11 h-11 rounded-xl flex flex-col items-center justify-center text-xs font-bold"
+          style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
+        >
+          <span>{formatJalali(session.session_date).split('/')[2]}</span>
         </div>
         <div>
-          <p className="text-sm font-medium text-white">{session.members?.full_name || '—'}</p>
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-xs text-gray-500">{session.session_time}</span>
-            <span className="text-xs text-gray-600">|</span>
-            <span className="text-xs text-gray-500">{session.duration_minutes} دقیقه</span>
-            <span className="text-xs px-1.5 py-0.5 rounded bg-gold-500/10 text-gold-400">
-              {sessionTypeLabels[session.session_type]}
-            </span>
-          </div>
+          <p className="text-sm font-medium" style={{ color: 'var(--text)' }}>
+            {session.members?.full_name || '—'}
+          </p>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            {session.session_time} · {session.duration_minutes} دقیقه ·{' '}
+            {sessionTypeLabels[session.session_type]}
+          </p>
         </div>
       </div>
       <div className="flex items-center gap-2">
-        <span className={`text-xs px-2 py-1 rounded-full ${cfg.bg} ${cfg.color} flex items-center gap-1`}>
+        <span
+          className="text-xs px-2 py-1 rounded-full flex items-center gap-1"
+          style={{ background: cfg.bg, color: cfg.color }}
+        >
           <CfgIcon size={10} />
           {cfg.label}
         </span>
         {session.status === 'scheduled' && (
-          <div className="flex items-center gap-1 mr-2">
-            <button
-              onClick={() => onUpdate(session.id, 'completed')}
-              className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-gray-400 hover:text-emerald-400 transition-colors"
-              title="تکمیل"
-            >
+          <>
+            <button type="button" onClick={() => onUpdate(session.id, 'completed')} style={{ color: 'var(--success)' }}>
               <CheckCircle size={16} />
             </button>
-            <button
-              onClick={() => onUpdate(session.id, 'cancelled')}
-              className="p-1.5 rounded-lg hover:bg-red-500/10 text-gray-400 hover:text-red-400 transition-colors"
-              title="لغو"
-            >
+            <button type="button" onClick={() => onUpdate(session.id, 'cancelled')} style={{ color: 'var(--danger)' }}>
               <XCircle size={16} />
             </button>
-          </div>
+          </>
         )}
       </div>
     </div>
