@@ -65,6 +65,7 @@ addCol('referrer_name', 'TEXT');
 addCol('referral_source', 'TEXT');
 addCol('training_goal', 'TEXT');
 addCol('photo_url', 'TEXT');
+addCol('national_id', 'TEXT');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS coaches (
@@ -137,13 +138,9 @@ app.get('/health', (_req, res) => res.json({ ok: true }));
 const { createReceipt } = registerReceiptRoutes(app, db);
 registerAccountingRoutes(app, db);
 
-/* COACHES */
 app.get('/coaches', (_req, res) => {
-  try {
-    res.json(db.prepare('SELECT * FROM coaches ORDER BY id DESC').all());
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to list coaches' });
-  }
+  try { res.json(db.prepare('SELECT * FROM coaches ORDER BY id DESC').all()); }
+  catch (err) { res.status(500).json({ error: 'Failed to list coaches' }); }
 });
 
 app.get('/coaches/:id', (req, res) => {
@@ -152,46 +149,29 @@ app.get('/coaches/:id', (req, res) => {
     const coach = db.prepare('SELECT * FROM coaches WHERE id = ?').get(id);
     if (!coach) return res.status(404).json({ error: 'Coach not found' });
     const members = db.prepare('SELECT * FROM members WHERE coach_id = ? ORDER BY id DESC').all(id);
-    let totalFee = 0;
-    let totalCommission = 0;
+    let totalFee = 0, totalCommission = 0;
     members.forEach((m) => {
       const fee = Number(m.monthly_fee) || 0;
       const pct = Number(m.coach_commission_percent) || Number(coach.commission_percent) || 0;
-      totalFee += fee;
-      totalCommission += (fee * pct) / 100;
+      totalFee += fee; totalCommission += (fee * pct) / 100;
     });
     res.json({ ...coach, members, stats: { member_count: members.length, total_monthly_fee: totalFee, total_commission: totalCommission } });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to get coach' });
-  }
+  } catch (err) { res.status(500).json({ error: 'Failed to get coach' }); }
 });
 
 app.post('/coaches', (req, res) => {
   const b = req.body || {};
   if (!b.full_name || !String(b.full_name).trim()) return res.status(400).json({ error: 'نام مربی الزامی است' });
   try {
-    const result = db.prepare(`
-      INSERT INTO coaches (full_name, phone, specialty, commission_percent, notes, is_active, has_insurance, insurance_notes, referrer_name, referral_source, training_goal, photo_url)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      String(b.full_name).trim(),
-      b.phone ? String(b.phone).trim() : null,
-      b.specialty ? String(b.specialty).trim() : null,
-      Number(b.commission_percent) || 0,
-      b.notes ? String(b.notes).trim() : null,
-      b.is_active === false || b.is_active === 0 ? 0 : 1,
-      b.has_insurance ? 1 : 0,
-      b.insurance_notes ? String(b.insurance_notes).trim() : null,
-      b.referrer_name ? String(b.referrer_name).trim() : null,
-      b.referral_source ? String(b.referral_source).trim() : null,
-      b.training_goal ? String(b.training_goal).trim() : null,
-      b.photo_url ? String(b.photo_url).trim() : null,
+    const result = db.prepare(`INSERT INTO coaches (full_name, phone, specialty, commission_percent, notes, is_active, has_insurance, insurance_notes, referrer_name, referral_source, training_goal, photo_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      String(b.full_name).trim(), b.phone ? String(b.phone).trim() : null, b.specialty ? String(b.specialty).trim() : null,
+      Number(b.commission_percent) || 0, b.notes ? String(b.notes).trim() : null, b.is_active === false || b.is_active === 0 ? 0 : 1,
+      b.has_insurance ? 1 : 0, b.insurance_notes ? String(b.insurance_notes).trim() : null,
+      b.referrer_name ? String(b.referrer_name).trim() : null, b.referral_source ? String(b.referral_source).trim() : null,
+      b.training_goal ? String(b.training_goal).trim() : null, b.photo_url ? String(b.photo_url).trim() : null,
     );
     res.status(201).json(db.prepare('SELECT * FROM coaches WHERE id = ?').get(result.lastInsertRowid));
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to create coach' });
-  }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Failed to create coach' }); }
 });
 
 app.put('/coaches/:id', (req, res) => {
@@ -200,11 +180,7 @@ app.put('/coaches/:id', (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Coach not found' });
   const b = req.body || {};
   try {
-    db.prepare(`
-      UPDATE coaches SET full_name=?, phone=?, specialty=?, commission_percent=?, notes=?, is_active=?,
-        has_insurance=?, insurance_notes=?, referrer_name=?, referral_source=?, training_goal=?, photo_url=?
-      WHERE id=?
-    `).run(
+    db.prepare(`UPDATE coaches SET full_name=?, phone=?, specialty=?, commission_percent=?, notes=?, is_active=?, has_insurance=?, insurance_notes=?, referrer_name=?, referral_source=?, training_goal=?, photo_url=? WHERE id=?`).run(
       b.full_name != null ? String(b.full_name).trim() : existing.full_name,
       b.phone !== undefined ? (b.phone ? String(b.phone).trim() : null) : existing.phone,
       b.specialty !== undefined ? (b.specialty ? String(b.specialty).trim() : null) : existing.specialty,
@@ -216,16 +192,12 @@ app.put('/coaches/:id', (req, res) => {
       b.referrer_name !== undefined ? (b.referrer_name ? String(b.referrer_name).trim() : null) : existing.referrer_name,
       b.referral_source !== undefined ? (b.referral_source ? String(b.referral_source).trim() : null) : existing.referral_source,
       b.training_goal !== undefined ? (b.training_goal ? String(b.training_goal).trim() : null) : existing.training_goal,
-      b.photo_url !== undefined ? (b.photo_url ? String(b.photo_url).trim() : null) : existing.photo_url,
-      id,
+      b.photo_url !== undefined ? (b.photo_url ? String(b.photo_url).trim() : null) : existing.photo_url, id,
     );
     const updated = db.prepare('SELECT * FROM coaches WHERE id = ?').get(id);
     db.prepare('UPDATE members SET coach_name = ? WHERE coach_id = ?').run(updated.full_name, id);
     res.json(updated);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to update coach' });
-  }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Failed to update coach' }); }
 });
 
 app.delete('/coaches/:id', (req, res) => {
@@ -235,18 +207,12 @@ app.delete('/coaches/:id', (req, res) => {
     const result = db.prepare('DELETE FROM coaches WHERE id = ?').run(id);
     if (result.changes === 0) return res.status(404).json({ error: 'Coach not found' });
     res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to delete coach' });
-  }
+  } catch (err) { res.status(500).json({ error: 'Failed to delete coach' }); }
 });
 
-/* MEMBERS */
 app.get('/members', (_req, res) => {
-  try {
-    res.json(db.prepare('SELECT * FROM members ORDER BY id DESC').all());
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to list members' });
-  }
+  try { res.json(db.prepare('SELECT * FROM members ORDER BY id DESC').all()); }
+  catch (err) { res.status(500).json({ error: 'Failed to list members' }); }
 });
 
 app.get('/members/by-code/:code', (req, res) => {
@@ -256,9 +222,7 @@ app.get('/members/by-code/:code', (req, res) => {
     const row = db.prepare('SELECT * FROM members WHERE personnel_code = ? COLLATE NOCASE').get(code);
     if (!row) return res.status(404).json({ error: 'Member not found' });
     res.json(row);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to lookup member' });
-  }
+  } catch (err) { res.status(500).json({ error: 'Failed to lookup member' }); }
 });
 
 app.get('/members/:id', (req, res) => {
@@ -270,9 +234,7 @@ app.get('/members/:id', (req, res) => {
     const attendanceCount = row.attendance_count != null ? row.attendance_count : db.prepare('SELECT COUNT(*) AS c FROM attendances WHERE member_id = ?').get(id).c;
     const receipts = db.prepare('SELECT * FROM receipts WHERE member_id = ? ORDER BY id DESC').all(id);
     res.json({ ...row, attendance_count: attendanceCount, recent_attendances: attendanceRows, receipts });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to get member' });
-  }
+  } catch (err) { res.status(500).json({ error: 'Failed to get member' }); }
 });
 
 function resolveCoachFields(coach_id, coach_name) {
@@ -280,8 +242,7 @@ function resolveCoachFields(coach_id, coach_name) {
   let cname = coach_name != null ? String(coach_name).trim() : null;
   if (cid) {
     const coach = db.prepare('SELECT * FROM coaches WHERE id = ?').get(cid);
-    if (coach) cname = coach.full_name;
-    else cid = null;
+    if (coach) cname = coach.full_name; else cid = null;
   }
   return { coach_id: cid, coach_name: cname || null };
 }
@@ -300,8 +261,8 @@ app.post('/members', (req, res) => {
       INSERT INTO members (
         name, phone, expiry_date, weekly_sessions, birthday, personnel_code, coach_name, coach_id,
         attendance_count, membership_type, start_date, monthly_fee, coach_commission_percent,
-        has_insurance, insurance_notes, referrer_name, referral_source, training_goal, photo_url
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        has_insurance, insurance_notes, referrer_name, referral_source, training_goal, photo_url, national_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       String(b.name).trim(), String(b.phone).trim(), String(b.expiry_date).trim(), Number(b.weekly_sessions) || 0,
       b.birthday ? String(b.birthday).trim() : null, code || null, coachFields.coach_name, coachFields.coach_id,
@@ -314,33 +275,20 @@ app.post('/members', (req, res) => {
       b.referral_source ? String(b.referral_source).trim() : null,
       b.training_goal ? String(b.training_goal).trim() : null,
       b.photo_url ? String(b.photo_url).trim() : null,
+      b.national_id ? String(b.national_id).trim() : null,
     );
     const row = db.prepare('SELECT * FROM members WHERE id = ?').get(result.lastInsertRowid);
     onMemberCreated(row);
-
     let receipt = null;
     try {
       receipt = createReceipt({
-        member_id: row.id,
-        member_name: row.name,
-        phone: row.phone,
-        type: 'registration',
-        amount: Number(row.monthly_fee) || 0,
-        months: 1,
-        membership_type: row.membership_type,
-        description: 'ثبت‌نام اولیه عضویت',
-        period_start: row.start_date,
-        period_end: row.expiry_date,
+        member_id: row.id, member_name: row.name, phone: row.phone, type: 'registration',
+        amount: Number(row.monthly_fee) || 0, months: 1, membership_type: row.membership_type,
+        description: 'ثبت‌نام اولیه عضویت', period_start: row.start_date, period_end: row.expiry_date,
       });
-    } catch (e) {
-      console.error('receipt create failed', e);
-    }
-
+    } catch (e) { console.error('receipt create failed', e); }
     res.status(201).json({ ...row, receipt });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to create member' });
-  }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Failed to create member' }); }
 });
 
 app.put('/members/:id', (req, res) => {
@@ -348,25 +296,21 @@ app.put('/members/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM members WHERE id = ?').get(id);
   if (!existing) return res.status(404).json({ error: 'Member not found' });
   const b = req.body || {};
-
   if (b.personnel_code != null && String(b.personnel_code).trim()) {
     const dup = db.prepare('SELECT id FROM members WHERE personnel_code = ? COLLATE NOCASE AND id != ?').get(String(b.personnel_code).trim(), id);
     if (dup) return res.status(400).json({ error: 'این کد پرسنلی قبلاً برای عضو دیگری ثبت شده است' });
   }
-
   const coachFields = b.coach_id !== undefined || b.coach_name !== undefined
     ? resolveCoachFields(b.coach_id !== undefined ? b.coach_id : existing.coach_id, b.coach_name !== undefined ? b.coach_name : existing.coach_name)
     : { coach_id: existing.coach_id, coach_name: existing.coach_name };
-
   const oldExpiry = existing.expiry_date;
-
   try {
     db.prepare(`
       UPDATE members SET
         name=?, phone=?, expiry_date=?, weekly_sessions=?, birthday=?, personnel_code=?,
         coach_name=?, coach_id=?, membership_type=?, start_date=?, attendance_count=?,
         monthly_fee=?, coach_commission_percent=?,
-        has_insurance=?, insurance_notes=?, referrer_name=?, referral_source=?, training_goal=?, photo_url=?
+        has_insurance=?, insurance_notes=?, referrer_name=?, referral_source=?, training_goal=?, photo_url=?, national_id=?
       WHERE id=?
     `).run(
       b.name != null ? String(b.name).trim() : existing.name,
@@ -387,38 +331,24 @@ app.put('/members/:id', (req, res) => {
       b.referral_source !== undefined ? (b.referral_source ? String(b.referral_source).trim() : null) : existing.referral_source,
       b.training_goal !== undefined ? (b.training_goal ? String(b.training_goal).trim() : null) : existing.training_goal,
       b.photo_url !== undefined ? (b.photo_url ? String(b.photo_url).trim() : null) : existing.photo_url,
+      b.national_id !== undefined ? (b.national_id ? String(b.national_id).trim() : null) : existing.national_id,
       id,
     );
-
     const row = db.prepare('SELECT * FROM members WHERE id = ?').get(id);
-
     let receipt = null;
     if (b._renewal || (b.expiry_date && String(b.expiry_date) !== oldExpiry)) {
       const amount = b._renewal?.amount != null ? Number(b._renewal.amount) : Number(row.monthly_fee) || 0;
       const months = b._renewal?.months != null ? Number(b._renewal.months) : 1;
       try {
         receipt = createReceipt({
-          member_id: row.id,
-          member_name: row.name,
-          phone: row.phone,
-          type: 'renewal',
-          amount,
-          months,
-          membership_type: row.membership_type,
-          description: 'تمدید عضویت',
-          period_start: oldExpiry,
-          period_end: row.expiry_date,
+          member_id: row.id, member_name: row.name, phone: row.phone, type: 'renewal',
+          amount, months, membership_type: row.membership_type, description: 'تمدید عضویت',
+          period_start: oldExpiry, period_end: row.expiry_date,
         });
-      } catch (e) {
-        console.error('renewal receipt failed', e);
-      }
+      } catch (e) { console.error('renewal receipt failed', e); }
     }
-
     res.json({ ...row, receipt });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to update member' });
-  }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Failed to update member' }); }
 });
 
 app.delete('/members/:id', (req, res) => {
@@ -428,9 +358,7 @@ app.delete('/members/:id', (req, res) => {
     const result = db.prepare('DELETE FROM members WHERE id = ?').run(id);
     if (result.changes === 0) return res.status(404).json({ error: 'Member not found' });
     res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to delete member' });
-  }
+  } catch (err) { res.status(500).json({ error: 'Failed to delete member' }); }
 });
 
 app.post('/attendance', (req, res) => {
@@ -445,20 +373,14 @@ app.post('/attendance', (req, res) => {
     );
     db.prepare(`UPDATE members SET attendance_count = COALESCE(attendance_count, 0) + 1 WHERE id = ?`).run(member.id);
     res.status(201).json({ success: true, member: db.prepare('SELECT * FROM members WHERE id = ?').get(member.id) });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to record attendance' });
-  }
+  } catch (err) { res.status(500).json({ error: 'Failed to record attendance' }); }
 });
 
 app.get('/members/:id/attendances', (req, res) => {
-  try {
-    res.json(db.prepare('SELECT * FROM attendances WHERE member_id = ? ORDER BY attended_at DESC LIMIT 100').all(Number(req.params.id)));
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to list attendances' });
-  }
+  try { res.json(db.prepare('SELECT * FROM attendances WHERE member_id = ? ORDER BY attended_at DESC LIMIT 100').all(Number(req.params.id))); }
+  catch (err) { res.status(500).json({ error: 'Failed to list attendances' }); }
 });
 
-/* SMS */
 app.get('/sms-logs', (req, res) => {
   try {
     const { phone, member_id } = req.query;
@@ -468,9 +390,7 @@ app.get('/sms-logs', (req, res) => {
     if (member_id) { query += ' AND member_id = ?'; params.push(Number(member_id)); }
     query += ' ORDER BY id DESC';
     res.json(db.prepare(query).all(...params));
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch sms logs' });
-  }
+  } catch (err) { res.status(500).json({ error: 'Failed to fetch sms logs' }); }
 });
 
 app.post('/sms/send', async (req, res) => {
@@ -478,18 +398,11 @@ app.post('/sms/send', async (req, res) => {
   if (!phone || !String(phone).trim()) return res.status(400).json({ error: 'phone is required' });
   if (!message || !String(message).trim()) return res.status(400).json({ error: 'message is required' });
   try {
-    const ok = await sendSMS({
-      member_id: member_id != null ? Number(member_id) : null,
-      name: name != null ? String(name).trim() : '',
-      phone: String(phone).trim(),
-      message: String(message).trim(),
-    });
+    const ok = await sendSMS({ member_id: member_id != null ? Number(member_id) : null, name: name != null ? String(name).trim() : '', phone: String(phone).trim(), message: String(message).trim() });
     const log = db.prepare('SELECT * FROM sms_logs ORDER BY id DESC LIMIT 1').get();
     if (!ok) return res.status(500).json({ success: false, error: 'Failed to send SMS', log: log || null });
     res.status(201).json({ success: true, log });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to send SMS' });
-  }
+  } catch (err) { res.status(500).json({ error: 'Failed to send SMS' }); }
 });
 
 app.post('/sms/broadcast', async (req, res) => {
@@ -497,23 +410,13 @@ app.post('/sms/broadcast', async (req, res) => {
   if (!Array.isArray(recipients) || recipients.length === 0) return res.status(400).json({ error: 'recipients array is required' });
   if (!message || !String(message).trim()) return res.status(400).json({ error: 'message is required' });
   const normalizedMessage = String(message).trim();
-  let successCount = 0;
-  let failureCount = 0;
+  let successCount = 0, failureCount = 0;
   const details = [];
   for (const recipient of recipients) {
     const phone = recipient?.phone ? String(recipient.phone).trim() : '';
-    if (!phone) {
-      failureCount += 1;
-      details.push({ member_id: recipient?.member_id ?? null, phone: '', success: false, error: 'missing phone' });
-      continue;
-    }
+    if (!phone) { failureCount += 1; details.push({ member_id: recipient?.member_id ?? null, phone: '', success: false, error: 'missing phone' }); continue; }
     try {
-      const ok = await sendSMS({
-        member_id: recipient.member_id != null ? Number(recipient.member_id) : null,
-        name: recipient.name != null ? String(recipient.name).trim() : '',
-        phone,
-        message: normalizedMessage,
-      });
+      const ok = await sendSMS({ member_id: recipient.member_id != null ? Number(recipient.member_id) : null, name: recipient.name != null ? String(recipient.name).trim() : '', phone, message: normalizedMessage });
       if (ok) { successCount += 1; details.push({ member_id: recipient.member_id, phone, success: true }); }
       else { failureCount += 1; details.push({ member_id: recipient.member_id, phone, success: false, error: 'send failed' }); }
     } catch (err) {
@@ -529,17 +432,7 @@ const distPath = path.join(__dirname, '..', 'dist');
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
   app.get('*', (req, res, next) => {
-    if (
-      req.path.startsWith('/members') ||
-      req.path.startsWith('/coaches') ||
-      req.path.startsWith('/sms') ||
-      req.path.startsWith('/attendance') ||
-      req.path.startsWith('/accounting') ||
-      req.path.startsWith('/receipts') ||
-      req.path.startsWith('/health')
-    ) {
-      return next();
-    }
+    if (req.path.startsWith('/members') || req.path.startsWith('/coaches') || req.path.startsWith('/sms') || req.path.startsWith('/attendance') || req.path.startsWith('/accounting') || req.path.startsWith('/receipts') || req.path.startsWith('/health')) return next();
     res.sendFile(path.join(distPath, 'index.html'));
   });
   console.log(`[STATIC] Serving frontend from ${distPath}`);
