@@ -18,6 +18,12 @@ export interface MemberFormPayload {
   coach_id?: number | null;
   monthly_fee?: number;
   coach_commission_percent?: number;
+  has_insurance?: boolean;
+  insurance_notes?: string;
+  referrer_name?: string;
+  referral_source?: string;
+  training_goal?: string;
+  photo_url?: string;
 }
 
 export interface MemberRecord extends MemberFormPayload {
@@ -51,6 +57,12 @@ function apiToRecord(row: ApiMember): MemberRecord {
     coach_id: row.coach_id != null ? Number(row.coach_id) : null,
     monthly_fee: Number(row.monthly_fee) || 0,
     coach_commission_percent: Number(row.coach_commission_percent) || 0,
+    has_insurance: row.has_insurance === 1 || row.has_insurance === true as unknown as number,
+    insurance_notes: row.insurance_notes ? String(row.insurance_notes) : '',
+    referrer_name: row.referrer_name ? String(row.referrer_name) : '',
+    referral_source: row.referral_source ? String(row.referral_source) : '',
+    training_goal: row.training_goal ? String(row.training_goal) : '',
+    photo_url: row.photo_url ? String(row.photo_url) : '',
     attendance_count: row.attendance_count ?? 0,
     is_active: active,
   };
@@ -70,6 +82,12 @@ function payloadToApi(payload: MemberFormPayload) {
     start_date: payload.start_date,
     monthly_fee: payload.monthly_fee ?? 0,
     coach_commission_percent: payload.coach_commission_percent ?? 0,
+    has_insurance: payload.has_insurance ? 1 : 0,
+    insurance_notes: payload.insurance_notes?.trim() || null,
+    referrer_name: payload.referrer_name?.trim() || null,
+    referral_source: payload.referral_source?.trim() || null,
+    training_goal: payload.training_goal?.trim() || null,
+    photo_url: payload.photo_url?.trim() || null,
   };
 }
 
@@ -88,10 +106,10 @@ export async function getMemberById(id: string) {
 }
 
 export async function addMember(member: MemberFormPayload) {
-  const result = await apiPost<ApiMember>('/members', payloadToApi(member));
+  const result = await apiPost<ApiMember & { receipt?: { token: string } }>('/members', payloadToApi(member));
   if (result.error) return { data: null, error: { message: result.error } };
   if (!result.data) return { data: null, error: { message: 'Empty response from server' } };
-  return { data: [apiToRecord(result.data)], error: null };
+  return { data: [apiToRecord(result.data)], receipt: (result.data as { receipt?: { token: string } }).receipt, error: null };
 }
 
 export async function updateMember(id: string, updates: MemberFormPayload) {
@@ -101,14 +119,19 @@ export async function updateMember(id: string, updates: MemberFormPayload) {
   return { data: [apiToRecord(result.data)], error: null };
 }
 
-export async function updateMemberExpiry(id: string, expiryDate: string, weeklySessions?: number) {
+export async function updateMemberExpiry(
+  id: string,
+  expiryDate: string,
+  weeklySessions?: number,
+  opts?: { amount?: number; months?: number; membership_type?: string },
+) {
   const getOne = await apiGet<ApiMember[]>('/members');
   if (getOne.error || !getOne.data) {
-    return { error: { message: getOne.error || 'Failed to load member' } };
+    return { data: null, error: { message: getOne.error || 'Failed to load member' } };
   }
   const existing = getOne.data.find((m) => String(m.id) === id);
-  if (!existing) return { error: { message: 'Member not found' } };
-  return apiPut<ApiMember>(`/members/${id}`, {
+  if (!existing) return { data: null, error: { message: 'Member not found' } };
+  const result = await apiPut<ApiMember & { receipt?: { token: string } }>(`/members/${id}`, {
     name: existing.name,
     phone: existing.phone,
     expiry_date: expiryDate,
@@ -117,11 +140,21 @@ export async function updateMemberExpiry(id: string, expiryDate: string, weeklyS
     coach_name: existing.coach_name,
     coach_id: existing.coach_id,
     birthday: existing.birthday,
-    membership_type: existing.membership_type,
+    membership_type: opts?.membership_type || existing.membership_type,
     start_date: existing.start_date,
     monthly_fee: existing.monthly_fee,
     coach_commission_percent: existing.coach_commission_percent,
+    has_insurance: existing.has_insurance,
+    insurance_notes: existing.insurance_notes,
+    referrer_name: existing.referrer_name,
+    referral_source: existing.referral_source,
+    training_goal: existing.training_goal,
+    photo_url: existing.photo_url,
+    _renewal: opts
+      ? { amount: opts.amount ?? existing.monthly_fee ?? 0, months: opts.months ?? 1 }
+      : undefined,
   });
+  return result;
 }
 
 export async function deleteMember(id: string) {

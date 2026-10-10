@@ -11,6 +11,7 @@ import SmsCenter from './pages/SmsCenter';
 import Coaches from './pages/Coaches';
 import CoachPortal from './pages/CoachPortal';
 import Accounting from './pages/Accounting';
+import ReceiptPage from './pages/ReceiptPage';
 import UsersPage from './pages/Users';
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
@@ -33,6 +34,9 @@ function App() {
         <AuthProvider>
           <Routes>
             <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
+            {/* فیش آنلاین — عمومی با لینک یکتا */}
+            <Route path="/receipt/:token" element={<ReceiptPage />} />
+
             <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard />} />
