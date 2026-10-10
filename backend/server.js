@@ -28,10 +28,6 @@ app.use(express.json());
 
 const db = new Database(DB_PATH);
 
-/* =========================
-   DATABASE SCHEMA
-========================= */
-
 db.exec(`
   CREATE TABLE IF NOT EXISTS members (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,7 +44,6 @@ db.exec(`
   )
 `);
 
-// مهاجرت ستون‌های جدید برای دیتابیس‌های قدیمی
 const memberCols = db.prepare(`PRAGMA table_info(members)`).all().map((c) => c.name);
 const addCol = (name, def) => {
   if (!memberCols.includes(name)) {
@@ -61,6 +56,22 @@ addCol('coach_name', 'TEXT');
 addCol('attendance_count', 'INTEGER NOT NULL DEFAULT 0');
 addCol('membership_type', "TEXT DEFAULT 'monthly'");
 addCol('start_date', 'TEXT');
+addCol('coach_id', 'INTEGER');
+addCol('monthly_fee', 'REAL DEFAULT 0');
+addCol('coach_commission_percent', 'REAL DEFAULT 0');
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS coaches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    full_name TEXT NOT NULL,
+    phone TEXT,
+    specialty TEXT,
+    commission_percent REAL DEFAULT 0,
+    notes TEXT,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+  )
+`);
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS attendances (
@@ -109,10 +120,153 @@ function checkExpiredMembers() {
 }
 
 cron.schedule('0 9 * * *', checkExpiredMembers, { timezone: 'Asia/Tehran' });
-console.log('Cron scheduled: daily at 09:00');
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true });
+});
+
+/* =========================
+   COACHES
+========================= */
+
+app.get('/coaches', (_req, res) => {
+  try {
+    const rows = db.prepare('SELECT * FROM coaches ORDER BY id DESC').all();
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to list coaches' });
+  }
+});
+
+app.get('/coaches/:id', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const coach = db.prepare('SELECT * FROM coaches WHERE id = ?').get(id);
+    if (!coach) return res.status(404).json({ error: 'Coach not found' });
+
+    const members = db
+      .prepare('SELECT * FROM members WHERE coach_id = ? ORDER BY id DESC')
+      .all(id);
+
+    let totalFee = 0;
+    let totalCommission = 0;
+    members.forEach((m) => {
+      const fee = Number(m.monthly_fee) || 0;
+      const pct =
+        Number(m.coach_commission_percent) ||
+        Number(coach.commission_percent) ||
+        0;
+      totalFee += fee;
+      totalCommission += (fee * pct) / 100;
+    });
+
+    res.json({
+      ...coach,
+      members,
+      stats: {
+        member_count: members.length,
+        total_monthly_fee: totalFee,
+        total_commission: totalCommission,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to get coach' });
+  }
+});
+
+app.post('/coaches', (req, res) => {
+  const { full_name, phone, specialty, commission_percent, notes, is_active } =
+    req.body || {};
+  if (!full_name || !String(full_name).trim()) {
+    return res.status(400).json({ error: 'نام مربی الزامی است' });
+  }
+  try {
+    const result = db
+      .prepare(`
+        INSERT INTO coaches (full_name, phone, specialty, commission_percent, notes, is_active)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        String(full_name).trim(),
+        phone ? String(phone).trim() : null,
+        specialty ? String(specialty).trim() : null,
+        Number(commission_percent) || 0,
+        notes ? String(notes).trim() : null,
+        is_active === false || is_active === 0 ? 0 : 1,
+      );
+    const row = db.prepare('SELECT * FROM coaches WHERE id = ?').get(result.lastInsertRowid);
+    res.status(201).json(row);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create coach' });
+  }
+});
+
+app.put('/coaches/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM coaches WHERE id = ?').get(id);
+  if (!existing) return res.status(404).json({ error: 'Coach not found' });
+
+  const { full_name, phone, specialty, commission_percent, notes, is_active } =
+    req.body || {};
+
+  try {
+    db.prepare(`
+      UPDATE coaches SET
+        full_name = ?,
+        phone = ?,
+        specialty = ?,
+        commission_percent = ?,
+        notes = ?,
+        is_active = ?
+      WHERE id = ?
+    `).run(
+      full_name != null ? String(full_name).trim() : existing.full_name,
+      phone !== undefined ? (phone ? String(phone).trim() : null) : existing.phone,
+      specialty !== undefined
+        ? specialty
+          ? String(specialty).trim()
+          : null
+        : existing.specialty,
+      commission_percent != null
+        ? Number(commission_percent)
+        : existing.commission_percent,
+      notes !== undefined ? (notes ? String(notes).trim() : null) : existing.notes,
+      is_active !== undefined
+        ? is_active === false || is_active === 0
+          ? 0
+          : 1
+        : existing.is_active,
+      id,
+    );
+
+    // همگام‌سازی نام مربی روی اعضا
+    const updated = db.prepare('SELECT * FROM coaches WHERE id = ?').get(id);
+    db.prepare('UPDATE members SET coach_name = ? WHERE coach_id = ?').run(
+      updated.full_name,
+      id,
+    );
+
+    res.json(updated);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update coach' });
+  }
+});
+
+app.delete('/coaches/:id', (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    db.prepare('UPDATE members SET coach_id = NULL, coach_name = NULL WHERE coach_id = ?').run(id);
+    const result = db.prepare('DELETE FROM coaches WHERE id = ?').run(id);
+    if (result.changes === 0) return res.status(404).json({ error: 'Coach not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete coach' });
+  }
 });
 
 /* =========================
@@ -129,7 +283,6 @@ app.get('/members', (_req, res) => {
   }
 });
 
-/** جستجو با کد پرسنلی / اثر انگشت */
 app.get('/members/by-code/:code', (req, res) => {
   try {
     const code = String(req.params.code || '').trim();
@@ -173,6 +326,20 @@ app.get('/members/:id', (req, res) => {
   }
 });
 
+function resolveCoachFields(coach_id, coach_name) {
+  let cid = coach_id != null && coach_id !== '' ? Number(coach_id) : null;
+  let cname = coach_name != null ? String(coach_name).trim() : null;
+  if (cid) {
+    const coach = db.prepare('SELECT * FROM coaches WHERE id = ?').get(cid);
+    if (coach) {
+      cname = coach.full_name;
+    } else {
+      cid = null;
+    }
+  }
+  return { coach_id: cid, coach_name: cname || null };
+}
+
 app.post('/members', (req, res) => {
   const {
     name,
@@ -182,8 +349,11 @@ app.post('/members', (req, res) => {
     birthday,
     personnel_code,
     coach_name,
+    coach_id,
     membership_type,
     start_date,
+    monthly_fee,
+    coach_commission_percent,
   } = req.body || {};
 
   if (!name || !phone || !expiry_date) {
@@ -198,14 +368,17 @@ app.post('/members', (req, res) => {
     }
   }
 
+  const coachFields = resolveCoachFields(coach_id, coach_name);
+
   try {
     const result = db
       .prepare(`
         INSERT INTO members (
           name, phone, expiry_date, weekly_sessions, birthday,
-          personnel_code, coach_name, attendance_count, membership_type, start_date
+          personnel_code, coach_name, coach_id, attendance_count,
+          membership_type, start_date, monthly_fee, coach_commission_percent
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
       `)
       .run(
         String(name).trim(),
@@ -214,9 +387,12 @@ app.post('/members', (req, res) => {
         Number(weekly_sessions) || 0,
         birthday ? String(birthday).trim() : null,
         code || null,
-        coach_name != null ? String(coach_name).trim() : null,
+        coachFields.coach_name,
+        coachFields.coach_id,
         membership_type ? String(membership_type).trim() : 'monthly',
         start_date ? String(start_date).trim() : todayIso(),
+        Number(monthly_fee) || 0,
+        Number(coach_commission_percent) || 0,
       );
 
     const row = db.prepare('SELECT * FROM members WHERE id = ?').get(result.lastInsertRowid);
@@ -243,9 +419,12 @@ app.put('/members/:id', (req, res) => {
     birthday,
     personnel_code,
     coach_name,
+    coach_id,
     membership_type,
     start_date,
     attendance_count,
+    monthly_fee,
+    coach_commission_percent,
   } = req.body || {};
 
   if (personnel_code != null && String(personnel_code).trim()) {
@@ -258,6 +437,14 @@ app.put('/members/:id', (req, res) => {
     }
   }
 
+  const coachFields =
+    coach_id !== undefined || coach_name !== undefined
+      ? resolveCoachFields(
+          coach_id !== undefined ? coach_id : existing.coach_id,
+          coach_name !== undefined ? coach_name : existing.coach_name,
+        )
+      : { coach_id: existing.coach_id, coach_name: existing.coach_name };
+
   try {
     db.prepare(`
       UPDATE members SET
@@ -268,9 +455,12 @@ app.put('/members/:id', (req, res) => {
         birthday = ?,
         personnel_code = ?,
         coach_name = ?,
+        coach_id = ?,
         membership_type = ?,
         start_date = ?,
-        attendance_count = ?
+        attendance_count = ?,
+        monthly_fee = ?,
+        coach_commission_percent = ?
       WHERE id = ?
     `).run(
       name != null ? String(name).trim() : existing.name,
@@ -279,14 +469,19 @@ app.put('/members/:id', (req, res) => {
       weekly_sessions != null ? Number(weekly_sessions) : existing.weekly_sessions,
       birthday !== undefined ? (birthday ? String(birthday).trim() : null) : existing.birthday,
       personnel_code !== undefined
-        ? (personnel_code ? String(personnel_code).trim() : null)
+        ? personnel_code
+          ? String(personnel_code).trim()
+          : null
         : existing.personnel_code,
-      coach_name !== undefined
-        ? (coach_name ? String(coach_name).trim() : null)
-        : existing.coach_name,
+      coachFields.coach_name,
+      coachFields.coach_id,
       membership_type != null ? String(membership_type).trim() : existing.membership_type || 'monthly',
       start_date != null ? String(start_date).trim() : existing.start_date,
       attendance_count != null ? Number(attendance_count) : existing.attendance_count || 0,
+      monthly_fee != null ? Number(monthly_fee) : existing.monthly_fee || 0,
+      coach_commission_percent != null
+        ? Number(coach_commission_percent)
+        : existing.coach_commission_percent || 0,
       id,
     );
 
@@ -313,14 +508,8 @@ app.delete('/members/:id', (req, res) => {
   }
 });
 
-/* =========================
-   ATTENDANCE (اثر انگشت / دستی)
-========================= */
-
-/** ثبت حضور با کد پرسنلی — برای اتصال به دستگاه اثر انگشت */
 app.post('/attendance', (req, res) => {
   const { personnel_code, member_id, source } = req.body || {};
-
   try {
     let member = null;
     if (member_id != null) {
@@ -330,10 +519,7 @@ app.post('/attendance', (req, res) => {
         .prepare('SELECT * FROM members WHERE personnel_code = ? COLLATE NOCASE')
         .get(String(personnel_code).trim());
     }
-
-    if (!member) {
-      return res.status(404).json({ error: 'Member not found' });
-    }
+    if (!member) return res.status(404).json({ error: 'Member not found' });
 
     db.prepare(`
       INSERT INTO attendances (member_id, personnel_code, source)
@@ -343,11 +529,9 @@ app.post('/attendance', (req, res) => {
       member.personnel_code || (personnel_code ? String(personnel_code).trim() : null),
       source ? String(source).trim() : 'fingerprint',
     );
-
-    db.prepare(`
-      UPDATE members SET attendance_count = COALESCE(attendance_count, 0) + 1 WHERE id = ?
-    `).run(member.id);
-
+    db.prepare(
+      `UPDATE members SET attendance_count = COALESCE(attendance_count, 0) + 1 WHERE id = ?`,
+    ).run(member.id);
     const updated = db.prepare('SELECT * FROM members WHERE id = ?').get(member.id);
     res.status(201).json({ success: true, member: updated });
   } catch (err) {
@@ -369,9 +553,6 @@ app.get('/members/:id/attendances', (req, res) => {
   }
 });
 
-/* =========================
-   SMS LOGS
-========================= */
 app.get('/sms-logs', (req, res) => {
   try {
     const { phone, member_id } = req.query;
@@ -386,8 +567,7 @@ app.get('/sms-logs', (req, res) => {
       params.push(Number(member_id));
     }
     query += ' ORDER BY id DESC';
-    const rows = db.prepare(query).all(...params);
-    res.json(rows);
+    res.json(db.prepare(query).all(...params));
   } catch (err) {
     console.error('GET /sms-logs', err);
     res.status(500).json({ error: 'Failed to fetch sms logs' });
@@ -396,12 +576,8 @@ app.get('/sms-logs', (req, res) => {
 
 app.post('/sms/send', async (req, res) => {
   const { member_id, name, phone, message } = req.body || {};
-  if (!phone || !String(phone).trim()) {
-    return res.status(400).json({ error: 'phone is required' });
-  }
-  if (!message || !String(message).trim()) {
-    return res.status(400).json({ error: 'message is required' });
-  }
+  if (!phone || !String(phone).trim()) return res.status(400).json({ error: 'phone is required' });
+  if (!message || !String(message).trim()) return res.status(400).json({ error: 'message is required' });
   try {
     const ok = await sendSMS({
       member_id: member_id != null ? Number(member_id) : null,
@@ -473,6 +649,7 @@ if (fs.existsSync(distPath)) {
   app.get('*', (req, res, next) => {
     if (
       req.path.startsWith('/members') ||
+      req.path.startsWith('/coaches') ||
       req.path.startsWith('/sms') ||
       req.path.startsWith('/attendance') ||
       req.path.startsWith('/health')
