@@ -9,6 +9,7 @@ const { onMemberCreated } = require('./services/eventService');
 const { sendSMS } = require('./services/smsService');
 const cron = require('node-cron');
 const { startCrons } = require('./services/cronManager');
+const { registerAccountingRoutes } = require('./routes/accounting');
 
 const PORT = Number(process.env.PORT) || 8000;
 const ENV = process.env.NODE_ENV || 'development';
@@ -125,14 +126,10 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
 
-/* =========================
-   COACHES
-========================= */
-
+/* COACHES */
 app.get('/coaches', (_req, res) => {
   try {
-    const rows = db.prepare('SELECT * FROM coaches ORDER BY id DESC').all();
-    res.json(rows);
+    res.json(db.prepare('SELECT * FROM coaches ORDER BY id DESC').all());
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to list coaches' });
@@ -144,31 +141,19 @@ app.get('/coaches/:id', (req, res) => {
     const id = Number(req.params.id);
     const coach = db.prepare('SELECT * FROM coaches WHERE id = ?').get(id);
     if (!coach) return res.status(404).json({ error: 'Coach not found' });
-
-    const members = db
-      .prepare('SELECT * FROM members WHERE coach_id = ? ORDER BY id DESC')
-      .all(id);
-
+    const members = db.prepare('SELECT * FROM members WHERE coach_id = ? ORDER BY id DESC').all(id);
     let totalFee = 0;
     let totalCommission = 0;
     members.forEach((m) => {
       const fee = Number(m.monthly_fee) || 0;
-      const pct =
-        Number(m.coach_commission_percent) ||
-        Number(coach.commission_percent) ||
-        0;
+      const pct = Number(m.coach_commission_percent) || Number(coach.commission_percent) || 0;
       totalFee += fee;
       totalCommission += (fee * pct) / 100;
     });
-
     res.json({
       ...coach,
       members,
-      stats: {
-        member_count: members.length,
-        total_monthly_fee: totalFee,
-        total_commission: totalCommission,
-      },
+      stats: { member_count: members.length, total_monthly_fee: totalFee, total_commission: totalCommission },
     });
   } catch (err) {
     console.error(err);
@@ -177,17 +162,13 @@ app.get('/coaches/:id', (req, res) => {
 });
 
 app.post('/coaches', (req, res) => {
-  const { full_name, phone, specialty, commission_percent, notes, is_active } =
-    req.body || {};
+  const { full_name, phone, specialty, commission_percent, notes, is_active } = req.body || {};
   if (!full_name || !String(full_name).trim()) {
     return res.status(400).json({ error: 'نام مربی الزامی است' });
   }
   try {
     const result = db
-      .prepare(`
-        INSERT INTO coaches (full_name, phone, specialty, commission_percent, notes, is_active)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `)
+      .prepare(`INSERT INTO coaches (full_name, phone, specialty, commission_percent, notes, is_active) VALUES (?, ?, ?, ?, ?, ?)`)
       .run(
         String(full_name).trim(),
         phone ? String(phone).trim() : null,
@@ -196,8 +177,7 @@ app.post('/coaches', (req, res) => {
         notes ? String(notes).trim() : null,
         is_active === false || is_active === 0 ? 0 : 1,
       );
-    const row = db.prepare('SELECT * FROM coaches WHERE id = ?').get(result.lastInsertRowid);
-    res.status(201).json(row);
+    res.status(201).json(db.prepare('SELECT * FROM coaches WHERE id = ?').get(result.lastInsertRowid));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create coach' });
@@ -208,47 +188,19 @@ app.put('/coaches/:id', (req, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM coaches WHERE id = ?').get(id);
   if (!existing) return res.status(404).json({ error: 'Coach not found' });
-
-  const { full_name, phone, specialty, commission_percent, notes, is_active } =
-    req.body || {};
-
+  const { full_name, phone, specialty, commission_percent, notes, is_active } = req.body || {};
   try {
-    db.prepare(`
-      UPDATE coaches SET
-        full_name = ?,
-        phone = ?,
-        specialty = ?,
-        commission_percent = ?,
-        notes = ?,
-        is_active = ?
-      WHERE id = ?
-    `).run(
+    db.prepare(`UPDATE coaches SET full_name=?, phone=?, specialty=?, commission_percent=?, notes=?, is_active=? WHERE id=?`).run(
       full_name != null ? String(full_name).trim() : existing.full_name,
       phone !== undefined ? (phone ? String(phone).trim() : null) : existing.phone,
-      specialty !== undefined
-        ? specialty
-          ? String(specialty).trim()
-          : null
-        : existing.specialty,
-      commission_percent != null
-        ? Number(commission_percent)
-        : existing.commission_percent,
+      specialty !== undefined ? (specialty ? String(specialty).trim() : null) : existing.specialty,
+      commission_percent != null ? Number(commission_percent) : existing.commission_percent,
       notes !== undefined ? (notes ? String(notes).trim() : null) : existing.notes,
-      is_active !== undefined
-        ? is_active === false || is_active === 0
-          ? 0
-          : 1
-        : existing.is_active,
+      is_active !== undefined ? (is_active === false || is_active === 0 ? 0 : 1) : existing.is_active,
       id,
     );
-
-    // همگام‌سازی نام مربی روی اعضا
     const updated = db.prepare('SELECT * FROM coaches WHERE id = ?').get(id);
-    db.prepare('UPDATE members SET coach_name = ? WHERE coach_id = ?').run(
-      updated.full_name,
-      id,
-    );
-
+    db.prepare('UPDATE members SET coach_name = ? WHERE coach_id = ?').run(updated.full_name, id);
     res.json(updated);
   } catch (err) {
     console.error(err);
@@ -269,14 +221,10 @@ app.delete('/coaches/:id', (req, res) => {
   }
 });
 
-/* =========================
-   MEMBERS
-========================= */
-
+/* MEMBERS */
 app.get('/members', (_req, res) => {
   try {
-    const rows = db.prepare('SELECT * FROM members ORDER BY id DESC').all();
-    res.json(rows);
+    res.json(db.prepare('SELECT * FROM members ORDER BY id DESC').all());
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to list members' });
@@ -287,9 +235,7 @@ app.get('/members/by-code/:code', (req, res) => {
   try {
     const code = String(req.params.code || '').trim();
     if (!code) return res.status(400).json({ error: 'code is required' });
-    const row = db
-      .prepare('SELECT * FROM members WHERE personnel_code = ? COLLATE NOCASE')
-      .get(code);
+    const row = db.prepare('SELECT * FROM members WHERE personnel_code = ? COLLATE NOCASE').get(code);
     if (!row) return res.status(404).json({ error: 'Member not found for this personnel code' });
     res.json(row);
   } catch (err) {
@@ -303,23 +249,9 @@ app.get('/members/:id', (req, res) => {
     const id = Number(req.params.id);
     const row = db.prepare('SELECT * FROM members WHERE id = ?').get(id);
     if (!row) return res.status(404).json({ error: 'Member not found' });
-
-    const attendanceRows = db
-      .prepare(
-        'SELECT * FROM attendances WHERE member_id = ? ORDER BY attended_at DESC LIMIT 50',
-      )
-      .all(id);
-
-    const attendanceCount =
-      row.attendance_count != null
-        ? row.attendance_count
-        : db.prepare('SELECT COUNT(*) AS c FROM attendances WHERE member_id = ?').get(id).c;
-
-    res.json({
-      ...row,
-      attendance_count: attendanceCount,
-      recent_attendances: attendanceRows,
-    });
+    const attendanceRows = db.prepare('SELECT * FROM attendances WHERE member_id = ? ORDER BY attended_at DESC LIMIT 50').all(id);
+    const attendanceCount = row.attendance_count != null ? row.attendance_count : db.prepare('SELECT COUNT(*) AS c FROM attendances WHERE member_id = ?').get(id).c;
+    res.json({ ...row, attendance_count: attendanceCount, recent_attendances: attendanceRows });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to get member' });
@@ -331,70 +263,31 @@ function resolveCoachFields(coach_id, coach_name) {
   let cname = coach_name != null ? String(coach_name).trim() : null;
   if (cid) {
     const coach = db.prepare('SELECT * FROM coaches WHERE id = ?').get(cid);
-    if (coach) {
-      cname = coach.full_name;
-    } else {
-      cid = null;
-    }
+    if (coach) cname = coach.full_name;
+    else cid = null;
   }
   return { coach_id: cid, coach_name: cname || null };
 }
 
 app.post('/members', (req, res) => {
-  const {
-    name,
-    phone,
-    expiry_date,
-    weekly_sessions,
-    birthday,
-    personnel_code,
-    coach_name,
-    coach_id,
-    membership_type,
-    start_date,
-    monthly_fee,
-    coach_commission_percent,
-  } = req.body || {};
-
-  if (!name || !phone || !expiry_date) {
-    return res.status(400).json({ error: 'missing fields' });
-  }
-
+  const { name, phone, expiry_date, weekly_sessions, birthday, personnel_code, coach_name, coach_id, membership_type, start_date, monthly_fee, coach_commission_percent } = req.body || {};
+  if (!name || !phone || !expiry_date) return res.status(400).json({ error: 'missing fields' });
   const code = personnel_code != null ? String(personnel_code).trim() : '';
   if (code) {
     const dup = db.prepare('SELECT id FROM members WHERE personnel_code = ? COLLATE NOCASE').get(code);
-    if (dup) {
-      return res.status(400).json({ error: 'این کد پرسنلی قبلاً ثبت شده است' });
-    }
+    if (dup) return res.status(400).json({ error: 'این کد پرسنلی قبلاً ثبت شده است' });
   }
-
   const coachFields = resolveCoachFields(coach_id, coach_name);
-
   try {
-    const result = db
-      .prepare(`
-        INSERT INTO members (
-          name, phone, expiry_date, weekly_sessions, birthday,
-          personnel_code, coach_name, coach_id, attendance_count,
-          membership_type, start_date, monthly_fee, coach_commission_percent
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
-      `)
-      .run(
-        String(name).trim(),
-        String(phone).trim(),
-        String(expiry_date).trim(),
-        Number(weekly_sessions) || 0,
-        birthday ? String(birthday).trim() : null,
-        code || null,
-        coachFields.coach_name,
-        coachFields.coach_id,
-        membership_type ? String(membership_type).trim() : 'monthly',
-        start_date ? String(start_date).trim() : todayIso(),
-        Number(monthly_fee) || 0,
-        Number(coach_commission_percent) || 0,
-      );
-
+    const result = db.prepare(`
+      INSERT INTO members (name, phone, expiry_date, weekly_sessions, birthday, personnel_code, coach_name, coach_id, attendance_count, membership_type, start_date, monthly_fee, coach_commission_percent)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+    `).run(
+      String(name).trim(), String(phone).trim(), String(expiry_date).trim(), Number(weekly_sessions) || 0,
+      birthday ? String(birthday).trim() : null, code || null, coachFields.coach_name, coachFields.coach_id,
+      membership_type ? String(membership_type).trim() : 'monthly', start_date ? String(start_date).trim() : todayIso(),
+      Number(monthly_fee) || 0, Number(coach_commission_percent) || 0,
+    );
     const row = db.prepare('SELECT * FROM members WHERE id = ?').get(result.lastInsertRowid);
     onMemberCreated(row);
     res.status(201).json(row);
@@ -407,86 +300,35 @@ app.post('/members', (req, res) => {
 app.put('/members/:id', (req, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM members WHERE id = ?').get(id);
-  if (!existing) {
-    return res.status(404).json({ error: 'Member not found' });
-  }
-
-  const {
-    name,
-    phone,
-    expiry_date,
-    weekly_sessions,
-    birthday,
-    personnel_code,
-    coach_name,
-    coach_id,
-    membership_type,
-    start_date,
-    attendance_count,
-    monthly_fee,
-    coach_commission_percent,
-  } = req.body || {};
-
+  if (!existing) return res.status(404).json({ error: 'Member not found' });
+  const { name, phone, expiry_date, weekly_sessions, birthday, personnel_code, coach_name, coach_id, membership_type, start_date, attendance_count, monthly_fee, coach_commission_percent } = req.body || {};
   if (personnel_code != null && String(personnel_code).trim()) {
-    const code = String(personnel_code).trim();
-    const dup = db
-      .prepare('SELECT id FROM members WHERE personnel_code = ? COLLATE NOCASE AND id != ?')
-      .get(code, id);
-    if (dup) {
-      return res.status(400).json({ error: 'این کد پرسنلی قبلاً برای عضو دیگری ثبت شده است' });
-    }
+    const dup = db.prepare('SELECT id FROM members WHERE personnel_code = ? COLLATE NOCASE AND id != ?').get(String(personnel_code).trim(), id);
+    if (dup) return res.status(400).json({ error: 'این کد پرسنلی قبلاً برای عضو دیگری ثبت شده است' });
   }
-
-  const coachFields =
-    coach_id !== undefined || coach_name !== undefined
-      ? resolveCoachFields(
-          coach_id !== undefined ? coach_id : existing.coach_id,
-          coach_name !== undefined ? coach_name : existing.coach_name,
-        )
-      : { coach_id: existing.coach_id, coach_name: existing.coach_name };
-
+  const coachFields = coach_id !== undefined || coach_name !== undefined
+    ? resolveCoachFields(coach_id !== undefined ? coach_id : existing.coach_id, coach_name !== undefined ? coach_name : existing.coach_name)
+    : { coach_id: existing.coach_id, coach_name: existing.coach_name };
   try {
     db.prepare(`
-      UPDATE members SET
-        name = ?,
-        phone = ?,
-        expiry_date = ?,
-        weekly_sessions = ?,
-        birthday = ?,
-        personnel_code = ?,
-        coach_name = ?,
-        coach_id = ?,
-        membership_type = ?,
-        start_date = ?,
-        attendance_count = ?,
-        monthly_fee = ?,
-        coach_commission_percent = ?
-      WHERE id = ?
+      UPDATE members SET name=?, phone=?, expiry_date=?, weekly_sessions=?, birthday=?, personnel_code=?, coach_name=?, coach_id=?, membership_type=?, start_date=?, attendance_count=?, monthly_fee=?, coach_commission_percent=?
+      WHERE id=?
     `).run(
       name != null ? String(name).trim() : existing.name,
       phone != null ? String(phone).trim() : existing.phone,
       expiry_date != null ? String(expiry_date).trim() : existing.expiry_date,
       weekly_sessions != null ? Number(weekly_sessions) : existing.weekly_sessions,
       birthday !== undefined ? (birthday ? String(birthday).trim() : null) : existing.birthday,
-      personnel_code !== undefined
-        ? personnel_code
-          ? String(personnel_code).trim()
-          : null
-        : existing.personnel_code,
-      coachFields.coach_name,
-      coachFields.coach_id,
+      personnel_code !== undefined ? (personnel_code ? String(personnel_code).trim() : null) : existing.personnel_code,
+      coachFields.coach_name, coachFields.coach_id,
       membership_type != null ? String(membership_type).trim() : existing.membership_type || 'monthly',
       start_date != null ? String(start_date).trim() : existing.start_date,
       attendance_count != null ? Number(attendance_count) : existing.attendance_count || 0,
       monthly_fee != null ? Number(monthly_fee) : existing.monthly_fee || 0,
-      coach_commission_percent != null
-        ? Number(coach_commission_percent)
-        : existing.coach_commission_percent || 0,
+      coach_commission_percent != null ? Number(coach_commission_percent) : existing.coach_commission_percent || 0,
       id,
     );
-
-    const row = db.prepare('SELECT * FROM members WHERE id = ?').get(id);
-    res.json(row);
+    res.json(db.prepare('SELECT * FROM members WHERE id = ?').get(id));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to update member' });
@@ -498,9 +340,7 @@ app.delete('/members/:id', (req, res) => {
   try {
     db.prepare('DELETE FROM attendances WHERE member_id = ?').run(id);
     const result = db.prepare('DELETE FROM members WHERE id = ?').run(id);
-    if (result.changes === 0) {
-      return res.status(404).json({ error: 'Member not found' });
-    }
+    if (result.changes === 0) return res.status(404).json({ error: 'Member not found' });
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -512,28 +352,14 @@ app.post('/attendance', (req, res) => {
   const { personnel_code, member_id, source } = req.body || {};
   try {
     let member = null;
-    if (member_id != null) {
-      member = db.prepare('SELECT * FROM members WHERE id = ?').get(Number(member_id));
-    } else if (personnel_code) {
-      member = db
-        .prepare('SELECT * FROM members WHERE personnel_code = ? COLLATE NOCASE')
-        .get(String(personnel_code).trim());
-    }
+    if (member_id != null) member = db.prepare('SELECT * FROM members WHERE id = ?').get(Number(member_id));
+    else if (personnel_code) member = db.prepare('SELECT * FROM members WHERE personnel_code = ? COLLATE NOCASE').get(String(personnel_code).trim());
     if (!member) return res.status(404).json({ error: 'Member not found' });
-
-    db.prepare(`
-      INSERT INTO attendances (member_id, personnel_code, source)
-      VALUES (?, ?, ?)
-    `).run(
-      member.id,
-      member.personnel_code || (personnel_code ? String(personnel_code).trim() : null),
-      source ? String(source).trim() : 'fingerprint',
+    db.prepare(`INSERT INTO attendances (member_id, personnel_code, source) VALUES (?, ?, ?)`).run(
+      member.id, member.personnel_code || (personnel_code ? String(personnel_code).trim() : null), source ? String(source).trim() : 'fingerprint',
     );
-    db.prepare(
-      `UPDATE members SET attendance_count = COALESCE(attendance_count, 0) + 1 WHERE id = ?`,
-    ).run(member.id);
-    const updated = db.prepare('SELECT * FROM members WHERE id = ?').get(member.id);
-    res.status(201).json({ success: true, member: updated });
+    db.prepare(`UPDATE members SET attendance_count = COALESCE(attendance_count, 0) + 1 WHERE id = ?`).run(member.id);
+    res.status(201).json({ success: true, member: db.prepare('SELECT * FROM members WHERE id = ?').get(member.id) });
   } catch (err) {
     console.error('POST /attendance', err);
     res.status(500).json({ error: 'Failed to record attendance' });
@@ -542,30 +368,21 @@ app.post('/attendance', (req, res) => {
 
 app.get('/members/:id/attendances', (req, res) => {
   try {
-    const id = Number(req.params.id);
-    const rows = db
-      .prepare('SELECT * FROM attendances WHERE member_id = ? ORDER BY attended_at DESC LIMIT 100')
-      .all(id);
-    res.json(rows);
+    res.json(db.prepare('SELECT * FROM attendances WHERE member_id = ? ORDER BY attended_at DESC LIMIT 100').all(Number(req.params.id)));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to list attendances' });
   }
 });
 
+/* SMS */
 app.get('/sms-logs', (req, res) => {
   try {
     const { phone, member_id } = req.query;
     let query = 'SELECT * FROM sms_logs WHERE 1=1';
     const params = [];
-    if (phone) {
-      query += ' AND phone LIKE ?';
-      params.push(`%${phone}%`);
-    }
-    if (member_id) {
-      query += ' AND member_id = ?';
-      params.push(Number(member_id));
-    }
+    if (phone) { query += ' AND phone LIKE ?'; params.push(`%${phone}%`); }
+    if (member_id) { query += ' AND member_id = ?'; params.push(Number(member_id)); }
     query += ' ORDER BY id DESC';
     res.json(db.prepare(query).all(...params));
   } catch (err) {
@@ -586,9 +403,7 @@ app.post('/sms/send', async (req, res) => {
       message: String(message).trim(),
     });
     const log = db.prepare('SELECT * FROM sms_logs ORDER BY id DESC LIMIT 1').get();
-    if (!ok) {
-      return res.status(500).json({ success: false, error: 'Failed to send SMS', log: log || null });
-    }
+    if (!ok) return res.status(500).json({ success: false, error: 'Failed to send SMS', log: log || null });
     res.status(201).json({ success: true, log });
   } catch (err) {
     console.error('POST /sms/send', err);
@@ -598,12 +413,8 @@ app.post('/sms/send', async (req, res) => {
 
 app.post('/sms/broadcast', async (req, res) => {
   const { recipients, message } = req.body || {};
-  if (!Array.isArray(recipients) || recipients.length === 0) {
-    return res.status(400).json({ error: 'recipients array is required' });
-  }
-  if (!message || !String(message).trim()) {
-    return res.status(400).json({ error: 'message is required' });
-  }
+  if (!Array.isArray(recipients) || recipients.length === 0) return res.status(400).json({ error: 'recipients array is required' });
+  if (!message || !String(message).trim()) return res.status(400).json({ error: 'message is required' });
   const normalizedMessage = String(message).trim();
   let successCount = 0;
   let failureCount = 0;
@@ -622,26 +433,19 @@ app.post('/sms/broadcast', async (req, res) => {
         phone,
         message: normalizedMessage,
       });
-      if (ok) {
-        successCount += 1;
-        details.push({ member_id: recipient.member_id, phone, success: true });
-      } else {
-        failureCount += 1;
-        details.push({ member_id: recipient.member_id, phone, success: false, error: 'send failed' });
-      }
+      if (ok) { successCount += 1; details.push({ member_id: recipient.member_id, phone, success: true }); }
+      else { failureCount += 1; details.push({ member_id: recipient.member_id, phone, success: false, error: 'send failed' }); }
     } catch (err) {
       failureCount += 1;
-      details.push({
-        member_id: recipient.member_id,
-        phone,
-        success: false,
-        error: err instanceof Error ? err.message : 'unknown error',
-      });
+      details.push({ member_id: recipient.member_id, phone, success: false, error: err instanceof Error ? err.message : 'unknown error' });
     }
     await delay(SMS_SEND_DELAY_MS);
   }
   res.json({ success_count: successCount, failure_count: failureCount, total: recipients.length, details });
 });
+
+/* ACCOUNTING */
+registerAccountingRoutes(app, db);
 
 const distPath = path.join(__dirname, '..', 'dist');
 if (fs.existsSync(distPath)) {
@@ -652,6 +456,7 @@ if (fs.existsSync(distPath)) {
       req.path.startsWith('/coaches') ||
       req.path.startsWith('/sms') ||
       req.path.startsWith('/attendance') ||
+      req.path.startsWith('/accounting') ||
       req.path.startsWith('/health')
     ) {
       return next();

@@ -10,6 +10,7 @@ import Renewals from './pages/Renewals';
 import SmsCenter from './pages/SmsCenter';
 import Coaches from './pages/Coaches';
 import CoachPortal from './pages/CoachPortal';
+import Accounting from './pages/Accounting';
 import UsersPage from './pages/Users';
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
@@ -17,10 +18,7 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}>
-        <div
-          className="w-8 h-8 border-2 rounded-full animate-spin"
-          style={{ borderColor: 'var(--border-strong)', borderTopColor: 'var(--accent)' }}
-        />
+        <div className="w-8 h-8 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--border-strong)', borderTopColor: 'var(--accent)' }} />
       </div>
     );
   }
@@ -46,6 +44,7 @@ function App() {
               <Route path="broadcast" element={<Navigate to="/sms?tab=broadcast" replace />} />
               <Route path="coaches" element={<ProtectedRoute requireAdmin><Coaches /></ProtectedRoute>} />
               <Route path="coach" element={<ProtectedRoute requireAdmin><CoachPortal /></ProtectedRoute>} />
+              <Route path="accounting" element={<ProtectedRoute requireAdmin><Accounting /></ProtectedRoute>} />
               <Route path="users" element={<ProtectedRoute requireAdmin><UsersPage /></ProtectedRoute>} />
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

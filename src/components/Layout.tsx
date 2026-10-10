@@ -17,6 +17,7 @@ import {
   Moon,
   ChevronLeft,
   UserRound,
+  Wallet,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -26,6 +27,7 @@ const NAV_ITEMS = [
   { to: '/sms', label: 'مرکز پیامک', icon: MessageSquare, adminOnly: false },
   { to: '/coaches', label: 'مربیان', icon: UserRound, adminOnly: true },
   { to: '/coach', label: 'پورتال مربی', icon: Dumbbell, adminOnly: true },
+  { to: '/accounting', label: 'حسابداری', icon: Wallet, adminOnly: true },
   { to: '/users', label: 'کاربران', icon: UserCog, adminOnly: true },
 ] as const;
 
@@ -36,6 +38,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/sms': 'مرکز پیامک',
   '/coaches': 'مربیان',
   '/coach': 'پورتال مربی',
+  '/accounting': 'حسابداری',
   '/users': 'مدیریت کاربران',
 };
 
