@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { roleLabel } from '../lib/roles';
+import { checkUpdates, getSystemVersion } from '../services/systemService';
 import {
   LayoutDashboard,
   Users,
@@ -18,6 +19,8 @@ import {
   ChevronLeft,
   UserRound,
   Wallet,
+  Settings,
+  Bell,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -28,6 +31,7 @@ const NAV_ITEMS = [
   { to: '/coaches', label: 'مربیان', icon: UserRound, adminOnly: true },
   { to: '/coach', label: 'پورتال مربی', icon: Dumbbell, adminOnly: true },
   { to: '/accounting', label: 'حسابداری', icon: Wallet, adminOnly: true },
+  { to: '/settings', label: 'تنظیمات', icon: Settings, adminOnly: true },
   { to: '/users', label: 'کاربران', icon: UserCog, adminOnly: true },
 ] as const;
 
@@ -39,6 +43,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/coaches': 'مربیان',
   '/coach': 'پورتال مربی',
   '/accounting': 'حسابداری',
+  '/settings': 'تنظیمات پنل',
   '/users': 'مدیریت کاربران',
 };
 
@@ -48,11 +53,30 @@ export default function Layout() {
   const { profile, isAdmin, signOut } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [appVersion, setAppVersion] = useState('—');
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [remoteVersion, setRemoteVersion] = useState<string | null>(null);
+  const [notifOpen, setNotifOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
 
   const visibleItems = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin);
   const pathKey = location.pathname.startsWith('/sms') ? '/sms' : location.pathname;
   const currentTitle = PAGE_TITLES[pathKey] || 'آلفا جیم';
+
+  useEffect(() => {
+    (async () => {
+      const v = await getSystemVersion();
+      if (v.data?.version) setAppVersion(v.data.version);
+      if (isAdmin) {
+        const u = await checkUpdates();
+        if (u.data?.update_available) {
+          setUpdateAvailable(true);
+          setRemoteVersion(u.data.remote_version);
+        }
+      }
+    })();
+  }, [isAdmin]);
 
   return (
     <div dir="rtl" className="min-h-screen" style={{ background: 'var(--bg)' }}>
@@ -115,6 +139,9 @@ export default function Layout() {
             <LogOut size={16} />
             خروج از حساب
           </button>
+          <p className="mt-3 text-center text-[10px] font-medium" style={{ color: 'var(--text-muted)' }} dir="ltr">
+            Alpha GYM v{appVersion}
+          </p>
         </div>
       </aside>
 
@@ -132,9 +159,65 @@ export default function Layout() {
               </div>
               <h2 className="sm:hidden text-sm font-semibold" style={{ color: 'var(--text)' }}>{currentTitle}</h2>
             </div>
-            <button type="button" onClick={toggleTheme} className="p-2.5 rounded-xl" style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}>
-              {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
-            </button>
+
+            <div className="flex items-center gap-2">
+              {/* زنگوله اعلان به‌روزرسانی */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setNotifOpen((v) => !v)}
+                  className="relative p-2.5 rounded-xl"
+                  style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}
+                  title="اعلان‌ها"
+                >
+                  <Bell size={18} />
+                  {updateAvailable && (
+                    <span
+                      className="absolute top-1.5 left-1.5 w-2 h-2 rounded-full"
+                      style={{ background: 'var(--danger)' }}
+                    />
+                  )}
+                </button>
+                {notifOpen && (
+                  <div
+                    className="absolute left-0 top-full mt-2 w-72 rounded-2xl p-3 z-50"
+                    style={{
+                      background: 'var(--bg-elevated)',
+                      border: '1px solid var(--border)',
+                      boxShadow: 'var(--shadow)',
+                    }}
+                  >
+                    <p className="text-xs font-semibold mb-2" style={{ color: 'var(--text)' }}>
+                      اعلان‌ها
+                    </p>
+                    {updateAvailable ? (
+                      <button
+                        type="button"
+                        className="w-full text-right p-3 rounded-xl text-sm"
+                        style={{ background: 'var(--accent-soft)', color: 'var(--text)' }}
+                        onClick={() => {
+                          setNotifOpen(false);
+                          navigate('/settings');
+                        }}
+                      >
+                        <span className="font-semibold block">نسخه جدید آماده است</span>
+                        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                          v{remoteVersion} — برای نصب به تنظیمات بروید
+                        </span>
+                      </button>
+                    ) : (
+                      <p className="text-xs p-2" style={{ color: 'var(--text-muted)' }}>
+                        اعلان جدیدی نیست
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <button type="button" onClick={toggleTheme} className="p-2.5 rounded-xl" style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}>
+                {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+              </button>
+            </div>
           </header>
           <main className="flex-1 p-4 sm:p-6 lg:p-8">
             <Outlet />

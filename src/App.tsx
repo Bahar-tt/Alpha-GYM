@@ -11,6 +11,7 @@ import SmsCenter from './pages/SmsCenter';
 import Coaches from './pages/Coaches';
 import CoachPortal from './pages/CoachPortal';
 import Accounting from './pages/Accounting';
+import Settings from './pages/Settings';
 import ReceiptPage from './pages/ReceiptPage';
 import UsersPage from './pages/Users';
 
@@ -34,7 +35,6 @@ function App() {
         <AuthProvider>
           <Routes>
             <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
-            {/* فیش آنلاین — عمومی با لینک یکتا */}
             <Route path="/receipt/:token" element={<ReceiptPage />} />
 
             <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
@@ -49,6 +49,7 @@ function App() {
               <Route path="coaches" element={<ProtectedRoute requireAdmin><Coaches /></ProtectedRoute>} />
               <Route path="coach" element={<ProtectedRoute requireAdmin><CoachPortal /></ProtectedRoute>} />
               <Route path="accounting" element={<ProtectedRoute requireAdmin><Accounting /></ProtectedRoute>} />
+              <Route path="settings" element={<ProtectedRoute requireAdmin><Settings /></ProtectedRoute>} />
               <Route path="users" element={<ProtectedRoute requireAdmin><UsersPage /></ProtectedRoute>} />
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
