@@ -13,6 +13,12 @@ export interface ApiMember {
   expiry_date: string;
   weekly_sessions: number;
   birthday?: string | null;
+  personnel_code?: string | null;
+  coach_name?: string | null;
+  attendance_count?: number;
+  membership_type?: string | null;
+  start_date?: string | null;
+  recent_attendances?: unknown[];
 }
 
 async function readBody(res: Response): Promise<unknown> {
