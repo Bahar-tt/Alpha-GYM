@@ -10,6 +10,7 @@ const { sendSMS } = require('./services/smsService');
 const cron = require('node-cron');
 const { startCrons } = require('./services/cronManager');
 const { registerAccountingRoutes } = require('./routes/accounting');
+const { registerReceiptRoutes } = require('./routes/receipts');
 
 const PORT = Number(process.env.PORT) || 8000;
 const ENV = process.env.NODE_ENV || 'development';
@@ -19,13 +20,11 @@ console.log(`[ENV] Running in ${ENV}`);
 console.log(`[DB] Using database at ${DB_PATH}`);
 
 const dbDir = path.dirname(DB_PATH);
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
-}
+if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 
 const db = new Database(DB_PATH);
 
@@ -60,6 +59,12 @@ addCol('start_date', 'TEXT');
 addCol('coach_id', 'INTEGER');
 addCol('monthly_fee', 'REAL DEFAULT 0');
 addCol('coach_commission_percent', 'REAL DEFAULT 0');
+addCol('has_insurance', 'INTEGER DEFAULT 0');
+addCol('insurance_notes', 'TEXT');
+addCol('referrer_name', 'TEXT');
+addCol('referral_source', 'TEXT');
+addCol('training_goal', 'TEXT');
+addCol('photo_url', 'TEXT');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS coaches (
@@ -73,6 +78,20 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   )
 `);
+
+const coachCols = db.prepare(`PRAGMA table_info(coaches)`).all().map((c) => c.name);
+const addCoachCol = (name, def) => {
+  if (!coachCols.includes(name)) {
+    db.exec(`ALTER TABLE coaches ADD COLUMN ${name} ${def}`);
+    console.log(`[DB] Added column coaches.${name}`);
+  }
+};
+addCoachCol('has_insurance', 'INTEGER DEFAULT 0');
+addCoachCol('insurance_notes', 'TEXT');
+addCoachCol('referrer_name', 'TEXT');
+addCoachCol('referral_source', 'TEXT');
+addCoachCol('training_goal', 'TEXT');
+addCoachCol('photo_url', 'TEXT');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS attendances (
@@ -107,31 +126,22 @@ function delay(ms) {
 }
 const SMS_SEND_DELAY_MS = Number(process.env.SMS_SEND_DELAY_MS) || 400;
 
-function checkExpiredMembers() {
+cron.schedule('0 9 * * *', () => {
   const today = todayIso();
-  const expired = db
-    .prepare('SELECT * FROM members WHERE expiry_date < ? ORDER BY expiry_date')
-    .all(today);
-  if (expired.length === 0) {
-    console.log(`[cron ${new Date().toISOString()}] No expired members.`);
-    return;
-  }
-  console.log(`[cron ${new Date().toISOString()}] Expired members (${expired.length}):`);
-  expired.forEach((m) => console.log(`- ${m.name} (${m.phone})`));
-}
+  const expired = db.prepare('SELECT * FROM members WHERE expiry_date < ? ORDER BY expiry_date').all(today);
+  console.log(`[cron] Expired members: ${expired.length}`);
+}, { timezone: 'Asia/Tehran' });
 
-cron.schedule('0 9 * * *', checkExpiredMembers, { timezone: 'Asia/Tehran' });
+app.get('/health', (_req, res) => res.json({ ok: true }));
 
-app.get('/health', (_req, res) => {
-  res.json({ ok: true });
-});
+const { createReceipt } = registerReceiptRoutes(app, db);
+registerAccountingRoutes(app, db);
 
 /* COACHES */
 app.get('/coaches', (_req, res) => {
   try {
     res.json(db.prepare('SELECT * FROM coaches ORDER BY id DESC').all());
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: 'Failed to list coaches' });
   }
 });
@@ -150,33 +160,33 @@ app.get('/coaches/:id', (req, res) => {
       totalFee += fee;
       totalCommission += (fee * pct) / 100;
     });
-    res.json({
-      ...coach,
-      members,
-      stats: { member_count: members.length, total_monthly_fee: totalFee, total_commission: totalCommission },
-    });
+    res.json({ ...coach, members, stats: { member_count: members.length, total_monthly_fee: totalFee, total_commission: totalCommission } });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: 'Failed to get coach' });
   }
 });
 
 app.post('/coaches', (req, res) => {
-  const { full_name, phone, specialty, commission_percent, notes, is_active } = req.body || {};
-  if (!full_name || !String(full_name).trim()) {
-    return res.status(400).json({ error: 'نام مربی الزامی است' });
-  }
+  const b = req.body || {};
+  if (!b.full_name || !String(b.full_name).trim()) return res.status(400).json({ error: 'نام مربی الزامی است' });
   try {
-    const result = db
-      .prepare(`INSERT INTO coaches (full_name, phone, specialty, commission_percent, notes, is_active) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(
-        String(full_name).trim(),
-        phone ? String(phone).trim() : null,
-        specialty ? String(specialty).trim() : null,
-        Number(commission_percent) || 0,
-        notes ? String(notes).trim() : null,
-        is_active === false || is_active === 0 ? 0 : 1,
-      );
+    const result = db.prepare(`
+      INSERT INTO coaches (full_name, phone, specialty, commission_percent, notes, is_active, has_insurance, insurance_notes, referrer_name, referral_source, training_goal, photo_url)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      String(b.full_name).trim(),
+      b.phone ? String(b.phone).trim() : null,
+      b.specialty ? String(b.specialty).trim() : null,
+      Number(b.commission_percent) || 0,
+      b.notes ? String(b.notes).trim() : null,
+      b.is_active === false || b.is_active === 0 ? 0 : 1,
+      b.has_insurance ? 1 : 0,
+      b.insurance_notes ? String(b.insurance_notes).trim() : null,
+      b.referrer_name ? String(b.referrer_name).trim() : null,
+      b.referral_source ? String(b.referral_source).trim() : null,
+      b.training_goal ? String(b.training_goal).trim() : null,
+      b.photo_url ? String(b.photo_url).trim() : null,
+    );
     res.status(201).json(db.prepare('SELECT * FROM coaches WHERE id = ?').get(result.lastInsertRowid));
   } catch (err) {
     console.error(err);
@@ -188,15 +198,25 @@ app.put('/coaches/:id', (req, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM coaches WHERE id = ?').get(id);
   if (!existing) return res.status(404).json({ error: 'Coach not found' });
-  const { full_name, phone, specialty, commission_percent, notes, is_active } = req.body || {};
+  const b = req.body || {};
   try {
-    db.prepare(`UPDATE coaches SET full_name=?, phone=?, specialty=?, commission_percent=?, notes=?, is_active=? WHERE id=?`).run(
-      full_name != null ? String(full_name).trim() : existing.full_name,
-      phone !== undefined ? (phone ? String(phone).trim() : null) : existing.phone,
-      specialty !== undefined ? (specialty ? String(specialty).trim() : null) : existing.specialty,
-      commission_percent != null ? Number(commission_percent) : existing.commission_percent,
-      notes !== undefined ? (notes ? String(notes).trim() : null) : existing.notes,
-      is_active !== undefined ? (is_active === false || is_active === 0 ? 0 : 1) : existing.is_active,
+    db.prepare(`
+      UPDATE coaches SET full_name=?, phone=?, specialty=?, commission_percent=?, notes=?, is_active=?,
+        has_insurance=?, insurance_notes=?, referrer_name=?, referral_source=?, training_goal=?, photo_url=?
+      WHERE id=?
+    `).run(
+      b.full_name != null ? String(b.full_name).trim() : existing.full_name,
+      b.phone !== undefined ? (b.phone ? String(b.phone).trim() : null) : existing.phone,
+      b.specialty !== undefined ? (b.specialty ? String(b.specialty).trim() : null) : existing.specialty,
+      b.commission_percent != null ? Number(b.commission_percent) : existing.commission_percent,
+      b.notes !== undefined ? (b.notes ? String(b.notes).trim() : null) : existing.notes,
+      b.is_active !== undefined ? (b.is_active === false || b.is_active === 0 ? 0 : 1) : existing.is_active,
+      b.has_insurance !== undefined ? (b.has_insurance ? 1 : 0) : existing.has_insurance,
+      b.insurance_notes !== undefined ? (b.insurance_notes ? String(b.insurance_notes).trim() : null) : existing.insurance_notes,
+      b.referrer_name !== undefined ? (b.referrer_name ? String(b.referrer_name).trim() : null) : existing.referrer_name,
+      b.referral_source !== undefined ? (b.referral_source ? String(b.referral_source).trim() : null) : existing.referral_source,
+      b.training_goal !== undefined ? (b.training_goal ? String(b.training_goal).trim() : null) : existing.training_goal,
+      b.photo_url !== undefined ? (b.photo_url ? String(b.photo_url).trim() : null) : existing.photo_url,
       id,
     );
     const updated = db.prepare('SELECT * FROM coaches WHERE id = ?').get(id);
@@ -216,7 +236,6 @@ app.delete('/coaches/:id', (req, res) => {
     if (result.changes === 0) return res.status(404).json({ error: 'Coach not found' });
     res.json({ ok: true });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: 'Failed to delete coach' });
   }
 });
@@ -226,7 +245,6 @@ app.get('/members', (_req, res) => {
   try {
     res.json(db.prepare('SELECT * FROM members ORDER BY id DESC').all());
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: 'Failed to list members' });
   }
 });
@@ -236,10 +254,9 @@ app.get('/members/by-code/:code', (req, res) => {
     const code = String(req.params.code || '').trim();
     if (!code) return res.status(400).json({ error: 'code is required' });
     const row = db.prepare('SELECT * FROM members WHERE personnel_code = ? COLLATE NOCASE').get(code);
-    if (!row) return res.status(404).json({ error: 'Member not found for this personnel code' });
+    if (!row) return res.status(404).json({ error: 'Member not found' });
     res.json(row);
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: 'Failed to lookup member' });
   }
 });
@@ -251,9 +268,9 @@ app.get('/members/:id', (req, res) => {
     if (!row) return res.status(404).json({ error: 'Member not found' });
     const attendanceRows = db.prepare('SELECT * FROM attendances WHERE member_id = ? ORDER BY attended_at DESC LIMIT 50').all(id);
     const attendanceCount = row.attendance_count != null ? row.attendance_count : db.prepare('SELECT COUNT(*) AS c FROM attendances WHERE member_id = ?').get(id).c;
-    res.json({ ...row, attendance_count: attendanceCount, recent_attendances: attendanceRows });
+    const receipts = db.prepare('SELECT * FROM receipts WHERE member_id = ? ORDER BY id DESC').all(id);
+    res.json({ ...row, attendance_count: attendanceCount, recent_attendances: attendanceRows, receipts });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: 'Failed to get member' });
   }
 });
@@ -270,27 +287,56 @@ function resolveCoachFields(coach_id, coach_name) {
 }
 
 app.post('/members', (req, res) => {
-  const { name, phone, expiry_date, weekly_sessions, birthday, personnel_code, coach_name, coach_id, membership_type, start_date, monthly_fee, coach_commission_percent } = req.body || {};
-  if (!name || !phone || !expiry_date) return res.status(400).json({ error: 'missing fields' });
-  const code = personnel_code != null ? String(personnel_code).trim() : '';
+  const b = req.body || {};
+  if (!b.name || !b.phone || !b.expiry_date) return res.status(400).json({ error: 'missing fields' });
+  const code = b.personnel_code != null ? String(b.personnel_code).trim() : '';
   if (code) {
     const dup = db.prepare('SELECT id FROM members WHERE personnel_code = ? COLLATE NOCASE').get(code);
     if (dup) return res.status(400).json({ error: 'این کد پرسنلی قبلاً ثبت شده است' });
   }
-  const coachFields = resolveCoachFields(coach_id, coach_name);
+  const coachFields = resolveCoachFields(b.coach_id, b.coach_name);
   try {
     const result = db.prepare(`
-      INSERT INTO members (name, phone, expiry_date, weekly_sessions, birthday, personnel_code, coach_name, coach_id, attendance_count, membership_type, start_date, monthly_fee, coach_commission_percent)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+      INSERT INTO members (
+        name, phone, expiry_date, weekly_sessions, birthday, personnel_code, coach_name, coach_id,
+        attendance_count, membership_type, start_date, monthly_fee, coach_commission_percent,
+        has_insurance, insurance_notes, referrer_name, referral_source, training_goal, photo_url
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      String(name).trim(), String(phone).trim(), String(expiry_date).trim(), Number(weekly_sessions) || 0,
-      birthday ? String(birthday).trim() : null, code || null, coachFields.coach_name, coachFields.coach_id,
-      membership_type ? String(membership_type).trim() : 'monthly', start_date ? String(start_date).trim() : todayIso(),
-      Number(monthly_fee) || 0, Number(coach_commission_percent) || 0,
+      String(b.name).trim(), String(b.phone).trim(), String(b.expiry_date).trim(), Number(b.weekly_sessions) || 0,
+      b.birthday ? String(b.birthday).trim() : null, code || null, coachFields.coach_name, coachFields.coach_id,
+      b.membership_type ? String(b.membership_type).trim() : 'monthly',
+      b.start_date ? String(b.start_date).trim() : todayIso(),
+      Number(b.monthly_fee) || 0, Number(b.coach_commission_percent) || 0,
+      b.has_insurance ? 1 : 0,
+      b.insurance_notes ? String(b.insurance_notes).trim() : null,
+      b.referrer_name ? String(b.referrer_name).trim() : null,
+      b.referral_source ? String(b.referral_source).trim() : null,
+      b.training_goal ? String(b.training_goal).trim() : null,
+      b.photo_url ? String(b.photo_url).trim() : null,
     );
     const row = db.prepare('SELECT * FROM members WHERE id = ?').get(result.lastInsertRowid);
     onMemberCreated(row);
-    res.status(201).json(row);
+
+    let receipt = null;
+    try {
+      receipt = createReceipt({
+        member_id: row.id,
+        member_name: row.name,
+        phone: row.phone,
+        type: 'registration',
+        amount: Number(row.monthly_fee) || 0,
+        months: 1,
+        membership_type: row.membership_type,
+        description: 'ثبت‌نام اولیه عضویت',
+        period_start: row.start_date,
+        period_end: row.expiry_date,
+      });
+    } catch (e) {
+      console.error('receipt create failed', e);
+    }
+
+    res.status(201).json({ ...row, receipt });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create member' });
@@ -301,34 +347,74 @@ app.put('/members/:id', (req, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM members WHERE id = ?').get(id);
   if (!existing) return res.status(404).json({ error: 'Member not found' });
-  const { name, phone, expiry_date, weekly_sessions, birthday, personnel_code, coach_name, coach_id, membership_type, start_date, attendance_count, monthly_fee, coach_commission_percent } = req.body || {};
-  if (personnel_code != null && String(personnel_code).trim()) {
-    const dup = db.prepare('SELECT id FROM members WHERE personnel_code = ? COLLATE NOCASE AND id != ?').get(String(personnel_code).trim(), id);
+  const b = req.body || {};
+
+  if (b.personnel_code != null && String(b.personnel_code).trim()) {
+    const dup = db.prepare('SELECT id FROM members WHERE personnel_code = ? COLLATE NOCASE AND id != ?').get(String(b.personnel_code).trim(), id);
     if (dup) return res.status(400).json({ error: 'این کد پرسنلی قبلاً برای عضو دیگری ثبت شده است' });
   }
-  const coachFields = coach_id !== undefined || coach_name !== undefined
-    ? resolveCoachFields(coach_id !== undefined ? coach_id : existing.coach_id, coach_name !== undefined ? coach_name : existing.coach_name)
+
+  const coachFields = b.coach_id !== undefined || b.coach_name !== undefined
+    ? resolveCoachFields(b.coach_id !== undefined ? b.coach_id : existing.coach_id, b.coach_name !== undefined ? b.coach_name : existing.coach_name)
     : { coach_id: existing.coach_id, coach_name: existing.coach_name };
+
+  const oldExpiry = existing.expiry_date;
+
   try {
     db.prepare(`
-      UPDATE members SET name=?, phone=?, expiry_date=?, weekly_sessions=?, birthday=?, personnel_code=?, coach_name=?, coach_id=?, membership_type=?, start_date=?, attendance_count=?, monthly_fee=?, coach_commission_percent=?
+      UPDATE members SET
+        name=?, phone=?, expiry_date=?, weekly_sessions=?, birthday=?, personnel_code=?,
+        coach_name=?, coach_id=?, membership_type=?, start_date=?, attendance_count=?,
+        monthly_fee=?, coach_commission_percent=?,
+        has_insurance=?, insurance_notes=?, referrer_name=?, referral_source=?, training_goal=?, photo_url=?
       WHERE id=?
     `).run(
-      name != null ? String(name).trim() : existing.name,
-      phone != null ? String(phone).trim() : existing.phone,
-      expiry_date != null ? String(expiry_date).trim() : existing.expiry_date,
-      weekly_sessions != null ? Number(weekly_sessions) : existing.weekly_sessions,
-      birthday !== undefined ? (birthday ? String(birthday).trim() : null) : existing.birthday,
-      personnel_code !== undefined ? (personnel_code ? String(personnel_code).trim() : null) : existing.personnel_code,
+      b.name != null ? String(b.name).trim() : existing.name,
+      b.phone != null ? String(b.phone).trim() : existing.phone,
+      b.expiry_date != null ? String(b.expiry_date).trim() : existing.expiry_date,
+      b.weekly_sessions != null ? Number(b.weekly_sessions) : existing.weekly_sessions,
+      b.birthday !== undefined ? (b.birthday ? String(b.birthday).trim() : null) : existing.birthday,
+      b.personnel_code !== undefined ? (b.personnel_code ? String(b.personnel_code).trim() : null) : existing.personnel_code,
       coachFields.coach_name, coachFields.coach_id,
-      membership_type != null ? String(membership_type).trim() : existing.membership_type || 'monthly',
-      start_date != null ? String(start_date).trim() : existing.start_date,
-      attendance_count != null ? Number(attendance_count) : existing.attendance_count || 0,
-      monthly_fee != null ? Number(monthly_fee) : existing.monthly_fee || 0,
-      coach_commission_percent != null ? Number(coach_commission_percent) : existing.coach_commission_percent || 0,
+      b.membership_type != null ? String(b.membership_type).trim() : existing.membership_type || 'monthly',
+      b.start_date != null ? String(b.start_date).trim() : existing.start_date,
+      b.attendance_count != null ? Number(b.attendance_count) : existing.attendance_count || 0,
+      b.monthly_fee != null ? Number(b.monthly_fee) : existing.monthly_fee || 0,
+      b.coach_commission_percent != null ? Number(b.coach_commission_percent) : existing.coach_commission_percent || 0,
+      b.has_insurance !== undefined ? (b.has_insurance ? 1 : 0) : existing.has_insurance || 0,
+      b.insurance_notes !== undefined ? (b.insurance_notes ? String(b.insurance_notes).trim() : null) : existing.insurance_notes,
+      b.referrer_name !== undefined ? (b.referrer_name ? String(b.referrer_name).trim() : null) : existing.referrer_name,
+      b.referral_source !== undefined ? (b.referral_source ? String(b.referral_source).trim() : null) : existing.referral_source,
+      b.training_goal !== undefined ? (b.training_goal ? String(b.training_goal).trim() : null) : existing.training_goal,
+      b.photo_url !== undefined ? (b.photo_url ? String(b.photo_url).trim() : null) : existing.photo_url,
       id,
     );
-    res.json(db.prepare('SELECT * FROM members WHERE id = ?').get(id));
+
+    const row = db.prepare('SELECT * FROM members WHERE id = ?').get(id);
+
+    let receipt = null;
+    if (b._renewal || (b.expiry_date && String(b.expiry_date) !== oldExpiry)) {
+      const amount = b._renewal?.amount != null ? Number(b._renewal.amount) : Number(row.monthly_fee) || 0;
+      const months = b._renewal?.months != null ? Number(b._renewal.months) : 1;
+      try {
+        receipt = createReceipt({
+          member_id: row.id,
+          member_name: row.name,
+          phone: row.phone,
+          type: 'renewal',
+          amount,
+          months,
+          membership_type: row.membership_type,
+          description: 'تمدید عضویت',
+          period_start: oldExpiry,
+          period_end: row.expiry_date,
+        });
+      } catch (e) {
+        console.error('renewal receipt failed', e);
+      }
+    }
+
+    res.json({ ...row, receipt });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to update member' });
@@ -343,7 +429,6 @@ app.delete('/members/:id', (req, res) => {
     if (result.changes === 0) return res.status(404).json({ error: 'Member not found' });
     res.json({ ok: true });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: 'Failed to delete member' });
   }
 });
@@ -361,7 +446,6 @@ app.post('/attendance', (req, res) => {
     db.prepare(`UPDATE members SET attendance_count = COALESCE(attendance_count, 0) + 1 WHERE id = ?`).run(member.id);
     res.status(201).json({ success: true, member: db.prepare('SELECT * FROM members WHERE id = ?').get(member.id) });
   } catch (err) {
-    console.error('POST /attendance', err);
     res.status(500).json({ error: 'Failed to record attendance' });
   }
 });
@@ -370,7 +454,6 @@ app.get('/members/:id/attendances', (req, res) => {
   try {
     res.json(db.prepare('SELECT * FROM attendances WHERE member_id = ? ORDER BY attended_at DESC LIMIT 100').all(Number(req.params.id)));
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: 'Failed to list attendances' });
   }
 });
@@ -386,7 +469,6 @@ app.get('/sms-logs', (req, res) => {
     query += ' ORDER BY id DESC';
     res.json(db.prepare(query).all(...params));
   } catch (err) {
-    console.error('GET /sms-logs', err);
     res.status(500).json({ error: 'Failed to fetch sms logs' });
   }
 });
@@ -406,7 +488,6 @@ app.post('/sms/send', async (req, res) => {
     if (!ok) return res.status(500).json({ success: false, error: 'Failed to send SMS', log: log || null });
     res.status(201).json({ success: true, log });
   } catch (err) {
-    console.error('POST /sms/send', err);
     res.status(500).json({ error: 'Failed to send SMS' });
   }
 });
@@ -437,15 +518,12 @@ app.post('/sms/broadcast', async (req, res) => {
       else { failureCount += 1; details.push({ member_id: recipient.member_id, phone, success: false, error: 'send failed' }); }
     } catch (err) {
       failureCount += 1;
-      details.push({ member_id: recipient.member_id, phone, success: false, error: err instanceof Error ? err.message : 'unknown error' });
+      details.push({ member_id: recipient.member_id, phone, success: false, error: err instanceof Error ? err.message : 'unknown' });
     }
     await delay(SMS_SEND_DELAY_MS);
   }
   res.json({ success_count: successCount, failure_count: failureCount, total: recipients.length, details });
 });
-
-/* ACCOUNTING */
-registerAccountingRoutes(app, db);
 
 const distPath = path.join(__dirname, '..', 'dist');
 if (fs.existsSync(distPath)) {
@@ -457,6 +535,7 @@ if (fs.existsSync(distPath)) {
       req.path.startsWith('/sms') ||
       req.path.startsWith('/attendance') ||
       req.path.startsWith('/accounting') ||
+      req.path.startsWith('/receipts') ||
       req.path.startsWith('/health')
     ) {
       return next();
