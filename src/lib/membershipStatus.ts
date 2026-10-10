@@ -2,14 +2,14 @@
 
 export type MembershipStatusKind =
   | 'active'
-  | 'expiring_soon' // کمتر از ۷ روز تا پایان (هنوز فعال)
+  | 'expiring_soon'
   | 'expired'
-  | 'archived';
+  | 'archived'
+  | 'renewed';
 
 export interface MembershipStatus {
   kind: MembershipStatusKind;
   label: string;
-  /** آیا نیاز به تمدید دارد */
   needsRenewal: boolean;
   daysLeft: number;
 }
@@ -26,7 +26,7 @@ function daysBetween(fromIso: string, toIso: string): number {
 
 export function getMembershipStatus(endDate: string, archived = false): MembershipStatus {
   if (archived) {
-    return { kind: 'archived', label: 'بایگانی‌شده', needsRenewal: false, daysLeft: 0 };
+    return { kind: 'archived', label: 'رد / بایگانی‌شده', needsRenewal: false, daysLeft: 0 };
   }
 
   const today = todayIso();
@@ -35,16 +35,20 @@ export function getMembershipStatus(endDate: string, archived = false): Membersh
   if (daysLeft < 0) {
     return {
       kind: 'expired',
-      label: 'منقضی — نیاز به تمدید',
+      label: 'غیرفعال — نیاز به تمدید',
       needsRenewal: true,
       daysLeft,
     };
   }
 
-  if (daysLeft <= 7) {
+  // ۳ روز یا کمتر: هشدار قرمز
+  if (daysLeft <= 3) {
     return {
       kind: 'expiring_soon',
-      label: daysLeft === 0 ? 'امروز منقضی می‌شود' : `${daysLeft} روز تا انقضا — نیاز به تمدید`,
+      label:
+        daysLeft === 0
+          ? 'فعال — امروز منقضی می‌شود'
+          : `فعال — ${daysLeft} روز تا انقضا`,
       needsRenewal: true,
       daysLeft,
     };
@@ -60,3 +64,19 @@ export function getMembershipStatus(endDate: string, archived = false): Membersh
 
 export const ARCHIVED_KEY = 'alpha_gym_archived_members';
 export const RENEWALS_KEY = 'alpha_gym_renewals';
+
+/** مدت ماه بر اساس نوع عضویت */
+export function monthsForMembershipType(type: string): number {
+  switch (type) {
+    case 'monthly':
+      return 1;
+    case 'quarterly':
+      return 3;
+    case 'yearly':
+      return 12;
+    case 'vip':
+      return 12;
+    default:
+      return 1;
+  }
+}

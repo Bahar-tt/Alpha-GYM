@@ -10,9 +10,6 @@ let started = false;
 
 const SMS_SEND_DELAY_MS = Number(process.env.SMS_SEND_DELAY_MS) || 400;
 
-/* =========================
-   HELPERS
-========================= */
 function todayIso() {
   return new Date().toISOString().split('T')[0];
 }
@@ -22,21 +19,29 @@ function delay(ms) {
 }
 
 /* =========================
-   BIRTHDAY CRON
+   BIRTHDAY CRON — هر روز تولد پیامک خودکار
 ========================= */
 async function checkBirthdays() {
   const today = todayJalali();
-  const [, month, day] = today.split('/');
+  const partsToday = today.split('/');
+  if (partsToday.length !== 3) return;
+  const month = partsToday[1];
+  const day = partsToday[2];
 
   const members = db.prepare(`
     SELECT * FROM members
-    WHERE birthday IS NOT NULL
+    WHERE birthday IS NOT NULL AND TRIM(birthday) != ''
   `).all();
 
   const birthdayMembers = members.filter((m) => {
-    const parts = String(m.birthday).split('/');
+    const parts = String(m.birthday).split(/[/-]/);
     if (parts.length !== 3) return false;
-    return parts[1] === month && parts[2] === day;
+    // پشتیبانی از YYYY/MM/DD یا YYYY-MM-DD شمسی
+    const bm = String(Number(parts[1])).padStart(2, '0');
+    const bd = String(Number(parts[2])).padStart(2, '0');
+    const tm = String(Number(month)).padStart(2, '0');
+    const td = String(Number(day)).padStart(2, '0');
+    return bm === tm && bd === td;
   });
 
   if (birthdayMembers.length === 0) {
@@ -64,39 +69,32 @@ async function checkBirthdays() {
 }
 
 /* =========================
-   EXPIRY REMINDER CRON
+   EXPIRY REMINDER — دقیقاً ۳ روز قبل از پایان، پیامک خودکار
 ========================= */
 async function checkExpiryReminders() {
   const today = new Date();
-  const targetDates = [1, 3, 7].map((days) => {
-    const d = new Date();
-    d.setDate(today.getDate() + days);
-    return d.toISOString().split('T')[0];
-  });
+  const d = new Date();
+  d.setDate(today.getDate() + 3);
+  const targetDate = d.toISOString().split('T')[0];
 
-  const placeholders = targetDates.map(() => '?').join(',');
   const members = db.prepare(`
     SELECT * FROM members
-    WHERE expiry_date IN (${placeholders})
-  `).all(...targetDates);
+    WHERE expiry_date = ?
+  `).all(targetDate);
 
   if (members.length === 0) {
-    console.log('[Expiry Cron] No expiring members soon');
+    console.log('[Expiry Cron] No members expiring in 3 days');
     return;
   }
 
-  console.log(`[Expiry Cron] Found ${members.length} member(s)`);
+  console.log(`[Expiry Cron] Found ${members.length} member(s) expiring in 3 days`);
 
   let successCount = 0;
   let failureCount = 0;
 
   for (const member of members) {
-    const todayDate = new Date();
-    const diff = Math.ceil(
-      (new Date(member.expiry_date) - todayDate) / (1000 * 60 * 60 * 24)
-    );
     try {
-      const ok = await sendExpiryWarning(member, diff);
+      const ok = await sendExpiryWarning(member, 3);
       if (ok) successCount++; else failureCount++;
     } catch (err) {
       failureCount++;
@@ -108,29 +106,24 @@ async function checkExpiryReminders() {
   console.log(`[Expiry Cron SUMMARY] total=${members.length} success=${successCount} failed=${failureCount}`);
 }
 
-/* =========================
-   START CRONS
-========================= */
 function startCrons() {
   if (started) return;
   started = true;
   console.log('[CRON] Starting production cron system...');
 
+  // تولد — هر روز ۹ صبح تهران
   cron.schedule('0 9 * * *', async () => {
     console.log('[CRON] Birthday check running...');
     await checkBirthdays();
-  }, {
-    timezone: 'Asia/Tehran',
-  });
+  }, { timezone: 'Asia/Tehran' });
 
+  // ۳ روز قبل انقضا — هر روز ۱۰ صبح تهران
   cron.schedule('0 10 * * *', async () => {
-    console.log('[CRON] Expiry reminder running...');
+    console.log('[CRON] Expiry reminder (3 days) running...');
     await checkExpiryReminders();
-  }, {
-    timezone: 'Asia/Tehran',
-  });
+  }, { timezone: 'Asia/Tehran' });
 
-  console.log('[CRON] All jobs active');
+  console.log('[CRON] All jobs active (birthday + 3-day expiry SMS)');
 }
 
 module.exports = {

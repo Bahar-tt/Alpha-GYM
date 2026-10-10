@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   addMember,
   deleteMember,
@@ -11,44 +11,44 @@ import {
 import { getApiErrorMessage } from '../lib/errors';
 import {
   addJalaliMonths,
-  compareJalali,
   formatJalali,
   jalaliToGregorianIso,
   gregorianToJalali,
   todayJalali,
   type JalaliDate,
 } from '../lib/jalaliDate';
-import { getMembershipStatus } from '../lib/membershipStatus';
+import {
+  getMembershipStatus,
+  monthsForMembershipType,
+  ARCHIVED_KEY,
+  RENEWALS_KEY,
+} from '../lib/membershipStatus';
+import { loadJson } from '../lib/localStore';
 import JalaliDatePicker from '../components/JalaliDatePicker';
-import { Pencil, Trash2, UserPlus, Search, X } from 'lucide-react';
+import { Pencil, Trash2, UserPlus, Search, X, Bell, Cake, Info } from 'lucide-react';
 import { Link } from 'react-router-dom';
-
-interface MemberForm {
-  full_name: string;
-  phone: string;
-  membership_type: MembershipType;
-  weekly_sessions: number;
-  total_sessions: number;
-  used_sessions: number;
-  start_date_jalali: JalaliDate;
-  end_date_jalali: JalaliDate;
-  birthday_jalali: JalaliDate | null;
-  notes: string;
-}
 
 type Member = MemberRecord;
 
 const membershipLabels: Record<MembershipType, string> = {
-  monthly: 'ماهانه',
-  quarterly: 'سه‌ماهه',
-  yearly: 'سالانه',
-  vip: 'VIP',
+  monthly: 'ماهانه (۱ ماه)',
+  quarterly: 'سه‌ماهه (۳ ماه)',
+  yearly: 'سالانه (۱۲ ماه)',
+  vip: 'VIP (۱۲ ماه)',
 };
+
+interface MemberForm {
+  first_name: string;
+  last_name: string;
+  phone: string;
+  membership_type: MembershipType;
+  birthday_jalali: JalaliDate | null;
+}
 
 function parseBirthdayToJalali(raw: string): JalaliDate | null {
   if (!raw || !raw.trim()) return null;
   const s = raw.trim();
-  if (s.includes('/') || (s.includes('-') && s.startsWith('13'))) {
+  if (s.includes('/') || (s.includes('-') && Number(s.slice(0, 4)) > 1200)) {
     const parts = s.split(/[/-]/).map(Number);
     if (parts.length === 3 && parts[0] > 1200 && parts[1] >= 1 && parts[1] <= 12 && parts[2] >= 1) {
       return { year: parts[0], month: parts[1], day: parts[2] };
@@ -69,54 +69,27 @@ function birthdayToStorage(d: JalaliDate | null): string {
   return `${d.year}/${String(d.month).padStart(2, '0')}/${String(d.day).padStart(2, '0')}`;
 }
 
-const defaultStart = todayJalali();
-const defaultEnd = addJalaliMonths(defaultStart, 1);
+function splitName(full: string): { first: string; last: string } {
+  const parts = (full || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { first: '', last: '' };
+  if (parts.length === 1) return { first: parts[0], last: '' };
+  return { first: parts[0], last: parts.slice(1).join(' ') };
+}
 
-const emptyForm: MemberForm = {
-  full_name: '',
+function formatJalaliDisplay(d: JalaliDate): string {
+  return `${d.year}/${String(d.month).padStart(2, '0')}/${String(d.day).padStart(2, '0')}`;
+}
+
+const emptyForm = (): MemberForm => ({
+  first_name: '',
+  last_name: '',
   phone: '',
   membership_type: 'monthly',
-  weekly_sessions: 3,
-  total_sessions: 12,
-  used_sessions: 0,
-  start_date_jalali: defaultStart,
-  end_date_jalali: defaultEnd,
   birthday_jalali: null,
-  notes: '',
-};
+});
 
-function validateForm(form: MemberForm): string | null {
-  if (!form.full_name.trim()) return 'نام الزامی است';
-  if (!form.phone.trim()) return 'شماره تلفن الزامی است';
-  if (form.weekly_sessions < 0) return 'جلسات هفتگی نمی‌تواند منفی باشد';
-  if (form.total_sessions < 0) return 'تعداد جلسات نمی‌تواند منفی باشد';
-  if (form.used_sessions < 0) return 'جلسات استفاده‌شده نمی‌تواند منفی باشد';
-  if (form.used_sessions > form.total_sessions) {
-    return 'جلسات استفاده‌شده نمی‌تواند بیشتر از کل جلسات باشد';
-  }
-  if (compareJalali(form.end_date_jalali, form.start_date_jalali) < 0) {
-    return 'تاریخ پایان باید بعد از تاریخ شروع باشد';
-  }
-  return null;
-}
-
-function toMemberPayload(form: MemberForm): MemberFormPayload {
-  return {
-    full_name: form.full_name.trim(),
-    phone: form.phone.trim(),
-    membership_type: form.membership_type,
-    weekly_sessions: form.weekly_sessions,
-    total_sessions: form.total_sessions,
-    used_sessions: form.used_sessions,
-    start_date: jalaliToGregorianIso(form.start_date_jalali),
-    end_date: jalaliToGregorianIso(form.end_date_jalali),
-    birthday: birthdayToStorage(form.birthday_jalali),
-    notes: form.notes.trim(),
-  };
-}
-
-function StatusBadge({ endDate }: { endDate: string }) {
-  const st = getMembershipStatus(endDate);
+function StatusBadge({ endDate, archived }: { endDate: string; archived?: boolean }) {
+  const st = getMembershipStatus(endDate, archived);
   if (st.kind === 'active') {
     return <span className="badge badge-success">{st.label}</span>;
   }
@@ -130,7 +103,10 @@ function StatusBadge({ endDate }: { endDate: string }) {
       </Link>
     );
   }
-  return <span className="badge badge-warning">{st.label}</span>;
+  if (st.kind === 'archived') {
+    return <span className="badge badge-warning">{st.label}</span>;
+  }
+  return <span className="badge badge-info">{st.label}</span>;
 }
 
 export default function Members() {
@@ -142,6 +118,26 @@ export default function Members() {
   const [form, setForm] = useState<MemberForm>(emptyForm);
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  const archivedIds = useMemo(() => new Set(loadJson<string[]>(ARCHIVED_KEY, [])), [members, showModal]);
+
+  const renewedIds = useMemo(() => {
+    const logs = loadJson<{ member_id: string; status: string }[]>(RENEWALS_KEY, []);
+    return new Set(logs.filter((l) => l.status === 'completed').map((l) => l.member_id));
+  }, [members, showModal]);
+
+  // تاریخ شروع = امروز ثبت — پایان بر اساس نوع عضویت
+  const startJalali = todayJalali();
+  const endJalali = useMemo(
+    () => addJalaliMonths(startJalali, monthsForMembershipType(form.membership_type)),
+    [form.membership_type, startJalali.year, startJalali.month, startJalali.day],
+  );
+
+  // برای ویرایش: شروع و پایان از رکورد
+  const editStart = editing ? gregorianToJalali(editing.start_date || editing.end_date) : startJalali;
+  const editEnd = editing
+    ? gregorianToJalali(editing.end_date)
+    : endJalali;
 
   useEffect(() => {
     fetchMembers();
@@ -161,47 +157,85 @@ export default function Members() {
   });
 
   const openAdd = () => {
-    const start = todayJalali();
     setEditing(null);
-    setForm({
-      ...emptyForm,
-      start_date_jalali: start,
-      end_date_jalali: addJalaliMonths(start, 1),
-      birthday_jalali: null,
-    });
+    setForm(emptyForm());
     setFormError('');
     setShowModal(true);
   };
 
   const openEdit = (member: Member) => {
+    const { first, last } = splitName(member.full_name);
     setEditing(member);
     setForm({
-      full_name: member.full_name,
+      first_name: first,
+      last_name: last,
       phone: member.phone,
-      membership_type: member.membership_type,
-      weekly_sessions: member.weekly_sessions ?? 3,
-      total_sessions: member.total_sessions ?? 12,
-      used_sessions: member.used_sessions ?? 0,
-      start_date_jalali: gregorianToJalali(member.start_date),
-      end_date_jalali: gregorianToJalali(member.end_date),
+      membership_type: member.membership_type || 'monthly',
       birthday_jalali: parseBirthdayToJalali(member.birthday ?? ''),
-      notes: member.notes ?? '',
     });
     setFormError('');
     setShowModal(true);
   };
 
+  const validate = (): string | null => {
+    if (!form.first_name.trim()) return 'نام الزامی است';
+    if (!form.last_name.trim()) return 'نام خانوادگی الزامی است';
+    if (!form.phone.trim()) return 'شماره تماس الزامی است';
+    if (!form.birthday_jalali) return 'تاریخ تولد الزامی است — از تقویم انتخاب کنید';
+    return null;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
-    const validationError = validateForm(form);
-    if (validationError) {
-      setFormError(validationError);
+    const err = validate();
+    if (err) {
+      setFormError(err);
       return;
     }
+
+    const fullName = `${form.first_name.trim()} ${form.last_name.trim()}`;
+    const start = editing ? editStart : todayJalali();
+    const end = editing
+      ? addJalaliMonths(editStart, monthsForMembershipType(form.membership_type))
+      : addJalaliMonths(todayJalali(), monthsForMembershipType(form.membership_type));
+
+    // اگر در حال ویرایش فقط نوع عضویت عوض شده، از امروز تمدید نکن — از همان start فعلی
+    const endDate = editing
+      ? addJalaliMonths(
+          gregorianToJalali(editing.start_date || editing.end_date),
+          monthsForMembershipType(form.membership_type),
+        )
+      : end;
+
+    const payload: MemberFormPayload = {
+      full_name: fullName,
+      phone: form.phone.trim(),
+      membership_type: form.membership_type,
+      weekly_sessions: 3,
+      total_sessions: 12,
+      used_sessions: 0,
+      start_date: jalaliToGregorianIso(editing ? gregorianToJalali(editing.start_date || editing.end_date) : todayJalali()),
+      end_date: jalaliToGregorianIso(
+        editing
+          ? addJalaliMonths(
+              gregorianToJalali(editing.start_date || editing.end_date),
+              monthsForMembershipType(form.membership_type),
+            )
+          : addJalaliMonths(todayJalali(), monthsForMembershipType(form.membership_type)),
+      ),
+      birthday: birthdayToStorage(form.birthday_jalali),
+      notes: '',
+    };
+
+    // برای ویرایش بدون تغییر نوع عضویت، تاریخ پایان قبلی را حفظ کن اگر نوع عوض نشده
+    if (editing && form.membership_type === editing.membership_type) {
+      payload.end_date = editing.end_date;
+      payload.start_date = editing.start_date || editing.end_date;
+    }
+
     setSubmitting(true);
     try {
-      const payload = toMemberPayload(form);
       if (editing) {
         const { error } = await updateMember(editing.id, payload);
         if (error) throw error;
@@ -210,11 +244,11 @@ export default function Members() {
         if (error) throw error;
       }
       setShowModal(false);
-      setForm(emptyForm);
+      setForm(emptyForm());
       setEditing(null);
       await fetchMembers();
-    } catch (err: unknown) {
-      setFormError(getApiErrorMessage(err));
+    } catch (e2: unknown) {
+      setFormError(getApiErrorMessage(e2));
     } finally {
       setSubmitting(false);
     }
@@ -227,14 +261,24 @@ export default function Members() {
     else fetchMembers();
   };
 
-  const onMembershipTypeChange = (type: MembershipType) => {
-    const months = type === 'monthly' ? 1 : type === 'quarterly' ? 3 : type === 'yearly' ? 12 : 1;
-    setForm((f) => ({
-      ...f,
-      membership_type: type,
-      end_date_jalali: addJalaliMonths(f.start_date_jalali, months),
-    }));
-  };
+  const previewEnd = editing
+    ? form.membership_type === editing.membership_type
+      ? formatJalali(editing.end_date)
+      : formatJalaliDisplay(
+          addJalaliMonths(
+            gregorianToJalali(editing.start_date || editing.end_date),
+            monthsForMembershipType(form.membership_type),
+          ),
+        )
+    : formatJalaliDisplay(endJalali);
+
+  const previewStart = editing
+    ? formatJalali(editing.start_date || editing.end_date)
+    : formatJalaliDisplay(startJalali);
+
+  const modalStatus = editing
+    ? getMembershipStatus(editing.end_date, archivedIds.has(editing.id))
+    : { kind: 'active' as const, label: 'پس از ثبت: فعال', needsRenewal: false, daysLeft: 30 };
 
   return (
     <div className="space-y-6">
@@ -279,7 +323,7 @@ export default function Members() {
             <table className="w-full text-right min-w-[780px]">
               <thead>
                 <tr style={{ background: 'var(--bg-muted)' }}>
-                  {['نام', 'تلفن', 'نوع عضویت', 'جلسات', 'پایان عضویت', 'وضعیت', ''].map((h) => (
+                  {['نام', 'تلفن', 'نوع عضویت', 'پایان عضویت', 'وضعیت', ''].map((h) => (
                     <th
                       key={h || 'actions'}
                       className="px-4 py-3 text-xs font-semibold"
@@ -292,9 +336,10 @@ export default function Members() {
               </thead>
               <tbody>
                 {filteredMembers.map((m) => {
-                  const st = getMembershipStatus(m.end_date);
+                  const archived = archivedIds.has(m.id);
+                  const st = getMembershipStatus(m.end_date, archived);
                   const rowClass =
-                    st.kind === 'expired'
+                    st.kind === 'expired' || st.kind === 'archived'
                       ? 'table-row row-expired'
                       : st.kind === 'expiring_soon'
                         ? 'table-row row-expiring'
@@ -313,32 +358,36 @@ export default function Members() {
                           >
                             {m.full_name?.charAt(0) || '?'}
                           </div>
-                          <span className="text-sm font-medium" style={{ color: 'var(--text)' }}>
-                            {m.full_name}
-                          </span>
+                          <div>
+                            <span className="text-sm font-medium block" style={{ color: 'var(--text)' }}>
+                              {m.full_name}
+                            </span>
+                            {renewedIds.has(m.id) && st.kind === 'active' && (
+                              <span className="text-[10px]" style={{ color: 'var(--success)' }}>
+                                تمدید شده
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </td>
                       <td className="px-4 py-3.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
                         {m.phone}
                       </td>
                       <td className="px-4 py-3.5">
-                        <span className="badge badge-info">{membershipLabels[m.membership_type]}</span>
-                      </td>
-                      <td className="px-4 py-3.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
-                        {(m.used_sessions ?? 0).toLocaleString('fa-IR')} /{' '}
-                        {(m.total_sessions ?? 0).toLocaleString('fa-IR')}
+                        <span className="badge badge-info">
+                          {membershipLabels[m.membership_type] || m.membership_type}
+                        </span>
                       </td>
                       <td
                         className="px-4 py-3.5 text-sm font-medium"
                         style={{
-                          color:
-                            st.kind === 'active' ? 'var(--text-secondary)' : 'var(--danger)',
+                          color: st.kind === 'active' ? 'var(--text-secondary)' : 'var(--danger)',
                         }}
                       >
                         {formatJalali(m.end_date)}
                       </td>
                       <td className="px-4 py-3.5">
-                        <StatusBadge endDate={m.end_date} />
+                        <StatusBadge endDate={m.end_date} archived={archived} />
                       </td>
                       <td className="px-4 py-3.5">
                         <div className="flex gap-1 justify-end">
@@ -379,7 +428,7 @@ export default function Members() {
         >
           <form
             onSubmit={handleSubmit}
-            className="w-full max-w-3xl rounded-2xl overflow-hidden flex flex-col"
+            className="w-full max-w-2xl rounded-2xl overflow-hidden flex flex-col"
             style={{
               background: 'var(--bg-elevated)',
               border: '1px solid var(--border)',
@@ -396,9 +445,6 @@ export default function Members() {
                 <h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>
                   {editing ? 'ویرایش عضو' : 'ثبت عضو جدید'}
                 </h2>
-                <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                  اطلاعات را کامل کنید و ذخیره را بزنید
-                </p>
               </div>
               <button
                 type="button"
@@ -411,6 +457,48 @@ export default function Members() {
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+              {/* وضعیت */}
+              <section
+                className="rounded-2xl p-4 space-y-3"
+                style={{ background: 'var(--bg-muted)', border: '1px solid var(--border)' }}
+              >
+                <div className="flex items-center gap-2">
+                  <Info size={16} style={{ color: 'var(--accent)' }} />
+                  <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
+                    وضعیت
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <span
+                    className={`badge ${
+                      modalStatus.kind === 'active'
+                        ? 'badge-success'
+                        : modalStatus.kind === 'archived'
+                          ? 'badge-warning'
+                          : 'badge-danger'
+                    }`}
+                  >
+                    {modalStatus.label}
+                  </span>
+                  {editing && renewedIds.has(editing.id) && (
+                    <span className="badge badge-info">تمدید شده</span>
+                  )}
+                  {editing && archivedIds.has(editing.id) && (
+                    <span className="badge badge-warning">رد شده</span>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  <div className="flex items-start gap-2">
+                    <Bell size={14} className="shrink-0 mt-0.5" style={{ color: 'var(--warning)' }} />
+                    <span>۳ روز قبل از پایان عضویت، پیامک یادآوری خودکار ارسال می‌شود.</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <Cake size={14} className="shrink-0 mt-0.5" style={{ color: 'var(--accent)' }} />
+                    <span>در روز تولد، پیامک تبریک خودکار ارسال می‌شود.</span>
+                  </div>
+                </div>
+              </section>
+
               {formError && (
                 <div
                   className="p-3 rounded-xl text-sm"
@@ -420,165 +508,107 @@ export default function Members() {
                 </div>
               )}
 
-              <section>
-                <p className="text-xs font-semibold mb-3" style={{ color: 'var(--text-muted)' }}>
-                  اطلاعات فردی
-                </p>
+              <section className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                      نام و نام خانوادگی <span style={{ color: 'var(--danger)' }}>*</span>
+                      نام <span style={{ color: 'var(--danger)' }}>*</span>
                     </label>
                     <input
                       className="input-field"
-                      placeholder="مثال: علی رضایی"
-                      value={form.full_name}
-                      onChange={(e) => setForm({ ...form, full_name: e.target.value })}
+                      placeholder="مثال: علی"
+                      value={form.first_name}
+                      onChange={(e) => setForm({ ...form, first_name: e.target.value })}
                       required
                     />
                   </div>
                   <div>
                     <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                      شماره موبایل <span style={{ color: 'var(--danger)' }}>*</span>
+                      نام خانوادگی <span style={{ color: 'var(--danger)' }}>*</span>
                     </label>
                     <input
                       className="input-field"
-                      placeholder="09xxxxxxxxx"
-                      value={form.phone}
-                      onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                      placeholder="مثال: رضایی"
+                      value={form.last_name}
+                      onChange={(e) => setForm({ ...form, last_name: e.target.value })}
                       required
-                      dir="ltr"
                     />
                   </div>
-                  <JalaliDatePicker
-                    label="تاریخ تولد"
-                    value={form.birthday_jalali}
-                    onChange={(birthday_jalali) => setForm({ ...form, birthday_jalali })}
-                    allowClear
-                    placeholder="اختیاری — انتخاب از تقویم"
-                  />
-                  <div>
-                    <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                      نوع عضویت
-                    </label>
-                    <select
-                      className="input-field"
-                      value={form.membership_type}
-                      onChange={(e) => onMembershipTypeChange(e.target.value as MembershipType)}
-                    >
-                      {Object.entries(membershipLabels).map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
                 </div>
-              </section>
 
-              <section>
-                <p className="text-xs font-semibold mb-3" style={{ color: 'var(--text-muted)' }}>
-                  بازه عضویت (شمسی)
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <JalaliDatePicker
-                    label="تاریخ شروع"
-                    value={form.start_date_jalali}
+                <div>
+                  <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+                    شماره تماس <span style={{ color: 'var(--danger)' }}>*</span>
+                  </label>
+                  <input
+                    className="input-field"
+                    placeholder="09xxxxxxxxx"
+                    value={form.phone}
+                    onChange={(e) => setForm({ ...form, phone: e.target.value })}
                     required
-                    onChange={(start_date_jalali) => {
-                      if (!start_date_jalali) return;
-                      setForm((f) => {
-                        const months =
-                          f.membership_type === 'monthly'
-                            ? 1
-                            : f.membership_type === 'quarterly'
-                              ? 3
-                              : f.membership_type === 'yearly'
-                                ? 12
-                                : 1;
-                        return {
-                          ...f,
-                          start_date_jalali,
-                          end_date_jalali: addJalaliMonths(start_date_jalali, months),
-                        };
-                      });
-                    }}
-                  />
-                  <JalaliDatePicker
-                    label="تاریخ پایان"
-                    value={form.end_date_jalali}
-                    required
-                    min={form.start_date_jalali}
-                    onChange={(end_date_jalali) => {
-                      if (!end_date_jalali) return;
-                      setForm({ ...form, end_date_jalali });
-                    }}
+                    dir="ltr"
                   />
                 </div>
-              </section>
 
-              <section>
-                <p className="text-xs font-semibold mb-3" style={{ color: 'var(--text-muted)' }}>
-                  جلسات
-                </p>
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                      هفتگی
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      className="input-field"
-                      value={form.weekly_sessions}
-                      onChange={(e) =>
-                        setForm({ ...form, weekly_sessions: Number(e.target.value) || 0 })
-                      }
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                      کل جلسات
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      className="input-field"
-                      value={form.total_sessions}
-                      onChange={(e) =>
-                        setForm({ ...form, total_sessions: Number(e.target.value) || 0 })
-                      }
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                      استفاده‌شده
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      max={form.total_sessions}
-                      className="input-field"
-                      value={form.used_sessions}
-                      onChange={(e) =>
-                        setForm({ ...form, used_sessions: Number(e.target.value) || 0 })
-                      }
-                    />
-                  </div>
-                </div>
-              </section>
-
-              <div>
-                <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                  یادداشت
-                </label>
-                <textarea
-                  className="input-field min-h-[72px]"
-                  placeholder="توضیحات اختیاری..."
-                  value={form.notes}
-                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                <JalaliDatePicker
+                  label="تاریخ تولد"
+                  value={form.birthday_jalali}
+                  onChange={(birthday_jalali) => setForm({ ...form, birthday_jalali })}
+                  required
+                  placeholder="انتخاب از تقویم شمسی"
                 />
-              </div>
+
+                <div>
+                  <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+                    نوع عضویت <span style={{ color: 'var(--danger)' }}>*</span>
+                  </label>
+                  <select
+                    className="input-field"
+                    value={form.membership_type}
+                    onChange={(e) =>
+                      setForm({ ...form, membership_type: e.target.value as MembershipType })
+                    }
+                  >
+                    {Object.entries(membershipLabels).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* تاریخ‌ها — فقط نمایش، غیرقابل ویرایش دستی */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+                      تاریخ شروع
+                    </label>
+                    <div
+                      className="input-field flex items-center"
+                      style={{ opacity: 0.85, cursor: 'default' }}
+                    >
+                      {previewStart}
+                      <span className="mr-auto text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                        {editing ? 'از ثبت قبلی' : 'روز ثبت‌نام'}
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+                      تاریخ پایان
+                    </label>
+                    <div
+                      className="input-field flex items-center font-semibold"
+                      style={{ opacity: 0.85, cursor: 'default', color: 'var(--accent)' }}
+                    >
+                      {previewEnd}
+                      <span className="mr-auto text-[10px] font-normal" style={{ color: 'var(--text-muted)' }}>
+                        خودکار از نوع عضویت
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </section>
             </div>
 
             <div
