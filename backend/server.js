@@ -11,6 +11,7 @@ const cron = require('node-cron');
 const { startCrons } = require('./services/cronManager');
 const { registerAccountingRoutes } = require('./routes/accounting');
 const { registerReceiptRoutes } = require('./routes/receipts');
+const { registerSystemRoutes } = require('./routes/system');
 
 const PORT = Number(process.env.PORT) || 8000;
 const ENV = process.env.NODE_ENV || 'development';
@@ -137,6 +138,7 @@ app.get('/health', (_req, res) => res.json({ ok: true }));
 
 const { createReceipt } = registerReceiptRoutes(app, db);
 registerAccountingRoutes(app, db);
+registerSystemRoutes(app);
 
 app.get('/coaches', (_req, res) => {
   try { res.json(db.prepare('SELECT * FROM coaches ORDER BY id DESC').all()); }
@@ -432,7 +434,7 @@ const distPath = path.join(__dirname, '..', 'dist');
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
   app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/members') || req.path.startsWith('/coaches') || req.path.startsWith('/sms') || req.path.startsWith('/attendance') || req.path.startsWith('/accounting') || req.path.startsWith('/receipts') || req.path.startsWith('/health')) return next();
+    if (req.path.startsWith('/members') || req.path.startsWith('/coaches') || req.path.startsWith('/sms') || req.path.startsWith('/attendance') || req.path.startsWith('/accounting') || req.path.startsWith('/receipts') || req.path.startsWith('/system') || req.path.startsWith('/health')) return next();
     res.sendFile(path.join(distPath, 'index.html'));
   });
   console.log(`[STATIC] Serving frontend from ${distPath}`);
