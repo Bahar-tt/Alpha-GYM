@@ -16,12 +16,13 @@ export interface ApiMember {
   start_date?: string | null;
   monthly_fee?: number | null;
   coach_commission_percent?: number | null;
-  has_insurance?: number | null;
+  has_insurance?: number | boolean | null;
   insurance_notes?: string | null;
   referrer_name?: string | null;
   referral_source?: string | null;
   training_goal?: string | null;
   photo_url?: string | null;
+  national_id?: string | null;
   recent_attendances?: unknown[];
 }
 

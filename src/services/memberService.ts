@@ -24,6 +24,7 @@ export interface MemberFormPayload {
   referral_source?: string;
   training_goal?: string;
   photo_url?: string;
+  national_id?: string;
 }
 
 export interface MemberRecord extends MemberFormPayload {
@@ -57,12 +58,13 @@ function apiToRecord(row: ApiMember): MemberRecord {
     coach_id: row.coach_id != null ? Number(row.coach_id) : null,
     monthly_fee: Number(row.monthly_fee) || 0,
     coach_commission_percent: Number(row.coach_commission_percent) || 0,
-    has_insurance: row.has_insurance === 1 || row.has_insurance === true as unknown as number,
+    has_insurance: !!(row.has_insurance === 1 || row.has_insurance === true),
     insurance_notes: row.insurance_notes ? String(row.insurance_notes) : '',
     referrer_name: row.referrer_name ? String(row.referrer_name) : '',
     referral_source: row.referral_source ? String(row.referral_source) : '',
     training_goal: row.training_goal ? String(row.training_goal) : '',
     photo_url: row.photo_url ? String(row.photo_url) : '',
+    national_id: row.national_id ? String(row.national_id) : '',
     attendance_count: row.attendance_count ?? 0,
     is_active: active,
   };
@@ -88,6 +90,7 @@ function payloadToApi(payload: MemberFormPayload) {
     referral_source: payload.referral_source?.trim() || null,
     training_goal: payload.training_goal?.trim() || null,
     photo_url: payload.photo_url?.trim() || null,
+    national_id: payload.national_id?.trim() || null,
   };
 }
 
@@ -131,7 +134,7 @@ export async function updateMemberExpiry(
   }
   const existing = getOne.data.find((m) => String(m.id) === id);
   if (!existing) return { data: null, error: { message: 'Member not found' } };
-  const result = await apiPut<ApiMember & { receipt?: { token: string } }>(`/members/${id}`, {
+  return apiPut<ApiMember & { receipt?: { token: string } }>(`/members/${id}`, {
     name: existing.name,
     phone: existing.phone,
     expiry_date: expiryDate,
@@ -150,11 +153,11 @@ export async function updateMemberExpiry(
     referral_source: existing.referral_source,
     training_goal: existing.training_goal,
     photo_url: existing.photo_url,
+    national_id: existing.national_id,
     _renewal: opts
       ? { amount: opts.amount ?? existing.monthly_fee ?? 0, months: opts.months ?? 1 }
       : undefined,
   });
-  return result;
 }
 
 export async function deleteMember(id: string) {
