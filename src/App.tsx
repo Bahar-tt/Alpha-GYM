@@ -7,9 +7,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Members from './pages/Members';
 import Renewals from './pages/Renewals';
-import Messaging from './pages/Messaging';
-import SmsLogs from './pages/SmsLogs';
-import Broadcast from './pages/Broadcast';
+import SmsCenter from './pages/SmsCenter';
 import CoachPortal from './pages/CoachPortal';
 import UsersPage from './pages/Users';
 
@@ -32,10 +30,6 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-/**
- * Layout یک‌بار mount می‌شود؛ فقط <Outlet /> با تغییر مسیر عوض می‌شود.
- * در نتیجه سایدبار بین صفحات remount نمی‌شود و ابعاد/آیتم‌ها ثابت می‌مانند.
- */
 function App() {
   return (
     <ThemeProvider>
@@ -63,23 +57,11 @@ function App() {
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="members" element={<Members />} />
               <Route path="renewals" element={<Renewals />} />
-              <Route path="messaging" element={<Messaging />} />
-              <Route
-                path="sms-logs"
-                element={
-                  <ProtectedRoute requireAdmin>
-                    <SmsLogs />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="broadcast"
-                element={
-                  <ProtectedRoute requireAdmin>
-                    <Broadcast />
-                  </ProtectedRoute>
-                }
-              />
+              <Route path="sms" element={<SmsCenter />} />
+              {/* ریدایرکت مسیرهای قدیمی */}
+              <Route path="messaging" element={<Navigate to="/sms" replace />} />
+              <Route path="sms-logs" element={<Navigate to="/sms?tab=logs" replace />} />
+              <Route path="broadcast" element={<Navigate to="/sms?tab=broadcast" replace />} />
               <Route
                 path="coach"
                 element={

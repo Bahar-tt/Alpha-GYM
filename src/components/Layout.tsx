@@ -8,8 +8,6 @@ import {
   Users,
   RefreshCcw,
   MessageSquare,
-  Send,
-  ScrollText,
   Dumbbell,
   LogOut,
   Menu,
@@ -24,9 +22,7 @@ const NAV_ITEMS = [
   { to: '/dashboard', label: 'داشبورد', icon: LayoutDashboard, adminOnly: false },
   { to: '/members', label: 'اعضا', icon: Users, adminOnly: false },
   { to: '/renewals', label: 'تمدیدها', icon: RefreshCcw, adminOnly: false },
-  { to: '/messaging', label: 'پیام‌رسانی', icon: MessageSquare, adminOnly: false },
-  { to: '/sms-logs', label: 'گزارش پیامک', icon: ScrollText, adminOnly: true },
-  { to: '/broadcast', label: 'ارسال گروهی', icon: Send, adminOnly: true },
+  { to: '/sms', label: 'مرکز پیامک', icon: MessageSquare, adminOnly: false },
   { to: '/coach', label: 'پورتال مربی', icon: Dumbbell, adminOnly: true },
   { to: '/users', label: 'کاربران', icon: UserCog, adminOnly: true },
 ] as const;
@@ -35,9 +31,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'داشبورد',
   '/members': 'مدیریت اعضا',
   '/renewals': 'تمدید عضویت',
-  '/messaging': 'پیام‌رسانی هوشمند',
-  '/sms-logs': 'گزارش پیامک‌ها',
-  '/broadcast': 'ارسال گروهی',
+  '/sms': 'مرکز پیامک',
   '/coach': 'پورتال مربی',
   '/users': 'مدیریت کاربران',
 };
@@ -51,7 +45,8 @@ export default function Layout() {
   const location = useLocation();
 
   const visibleItems = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin);
-  const currentTitle = PAGE_TITLES[location.pathname] || 'آلفا جیم';
+  const pathKey = location.pathname.startsWith('/sms') ? '/sms' : location.pathname;
+  const currentTitle = PAGE_TITLES[pathKey] || 'آلفا جیم';
 
   return (
     <div dir="rtl" className="min-h-screen" style={{ background: 'var(--bg)' }}>
@@ -84,7 +79,9 @@ export default function Layout() {
             <img src="/v5.png" alt="Alpha" className="w-8 h-8 object-contain" />
           </div>
           <div className="min-w-0 flex-1">
-            <h1 className="text-sm font-bold" style={{ color: 'var(--text)' }}>Alpha GYM</h1>
+            <h1 className="text-sm font-bold" style={{ color: 'var(--text)' }}>
+              Alpha GYM
+            </h1>
             <p className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>
               مدیریت هوشمند باشگاه
             </p>
@@ -100,7 +97,10 @@ export default function Layout() {
         </div>
 
         <nav className="flex-1 overflow-y-auto px-3 py-3">
-          <p className="px-3 mb-2 text-[10px] font-semibold tracking-wider" style={{ color: 'var(--text-muted)' }}>
+          <p
+            className="px-3 mb-2 text-[10px] font-semibold tracking-wider"
+            style={{ color: 'var(--text-muted)' }}
+          >
             منوی اصلی
           </p>
           <ul className="space-y-0.5">
@@ -111,7 +111,9 @@ export default function Layout() {
                   onClick={() => setMobileOpen(false)}
                   className={({ isActive }) =>
                     `flex items-center gap-3 h-11 px-3.5 rounded-xl text-sm font-medium ${
-                      isActive ? 'nav-item-active' : 'nav-item'
+                      isActive || (item.to === '/sms' && location.pathname.startsWith('/sms'))
+                        ? 'nav-item-active'
+                        : 'nav-item'
                     }`
                   }
                 >
@@ -152,13 +154,7 @@ export default function Layout() {
         </div>
       </aside>
 
-      {/* محتوای اصلی — padding ثابت برای سایدبار، بدون width calc که محتوا را خالی می‌کرد */}
-      <div
-        className="min-h-screen flex flex-col"
-        style={{
-          paddingRight: 0,
-        }}
-      >
+      <div className="min-h-screen flex flex-col">
         <div className="lg:pr-[280px] min-h-screen flex flex-col w-full">
           <header
             className="sticky top-0 z-30 h-16 shrink-0 px-4 sm:px-6 flex items-center justify-between gap-3"
@@ -176,10 +172,15 @@ export default function Layout() {
               >
                 <Menu size={20} />
               </button>
-              <div className="hidden sm:flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-muted)' }}>
+              <div
+                className="hidden sm:flex items-center gap-1.5 text-xs"
+                style={{ color: 'var(--text-muted)' }}
+              >
                 <span>آلفا جیم</span>
                 <ChevronLeft size={12} />
-                <span className="font-medium" style={{ color: 'var(--text)' }}>{currentTitle}</span>
+                <span className="font-medium" style={{ color: 'var(--text)' }}>
+                  {currentTitle}
+                </span>
               </div>
               <h2 className="sm:hidden text-sm font-semibold" style={{ color: 'var(--text)' }}>
                 {currentTitle}
@@ -191,7 +192,10 @@ export default function Layout() {
                 className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium"
                 style={{ background: 'var(--success-soft)', color: 'var(--success)' }}
               >
-                <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--success)' }} />
+                <span
+                  className="w-1.5 h-1.5 rounded-full animate-pulse"
+                  style={{ background: 'var(--success)' }}
+                />
                 سیستم فعال
               </div>
               <button
@@ -205,7 +209,7 @@ export default function Layout() {
             </div>
           </header>
 
-          <main className="flex-1 p-4 sm:p-6 lg:p-8" key={location.pathname}>
+          <main className="flex-1 p-4 sm:p-6 lg:p-8">
             <Outlet />
           </main>
         </div>
