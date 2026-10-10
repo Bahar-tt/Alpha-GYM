@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { roleLabel } from '../lib/roles';
 import { checkUpdates, getSystemVersion } from '../services/systemService';
 import {
   LayoutDashboard,
@@ -63,6 +62,7 @@ export default function Layout() {
   const visibleItems = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin);
   const pathKey = location.pathname.startsWith('/sms') ? '/sms' : location.pathname;
   const currentTitle = PAGE_TITLES[pathKey] || 'آلفا جیم';
+  const displayName = profile?.full_name?.trim() || 'کاربر';
 
   useEffect(() => {
     (async () => {
@@ -126,15 +126,6 @@ export default function Layout() {
         </nav>
 
         <div className="shrink-0 p-4" style={{ borderTop: '1px solid var(--border)' }}>
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold text-white shrink-0" style={{ background: 'linear-gradient(135deg, #d4a843, #b8862a)' }}>
-              {profile?.full_name?.charAt(0) || 'A'}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold truncate" style={{ color: 'var(--text)' }}>{profile?.full_name || 'کاربر'}</p>
-              <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{roleLabel(profile?.role)}</p>
-            </div>
-          </div>
           <button type="button" onClick={signOut} className="flex items-center gap-2 w-full h-10 px-3 text-sm rounded-xl" style={{ color: 'var(--text-secondary)' }}>
             <LogOut size={16} />
             خروج از حساب
@@ -160,8 +151,25 @@ export default function Layout() {
               <h2 className="sm:hidden text-sm font-semibold" style={{ color: 'var(--text)' }}>{currentTitle}</h2>
             </div>
 
-            <div className="flex items-center gap-2">
-              {/* زنگوله اعلان به‌روزرسانی */}
+            <div className="flex items-center gap-2 sm:gap-3">
+              {/* کاربر واردشده */}
+              <div className="flex items-center gap-2 min-w-0">
+                <div
+                  className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold text-white shrink-0"
+                  style={{ background: 'linear-gradient(135deg, #d4a843, #b8862a)' }}
+                >
+                  {displayName.charAt(0)}
+                </div>
+                <div className="hidden sm:block min-w-0 text-right">
+                  <p className="text-xs font-semibold truncate max-w-[140px]" style={{ color: 'var(--text)' }}>
+                    {displayName}
+                  </p>
+                  <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                    وارد شده
+                  </p>
+                </div>
+              </div>
+
               <div className="relative">
                 <button
                   type="button"
@@ -172,10 +180,7 @@ export default function Layout() {
                 >
                   <Bell size={18} />
                   {updateAvailable && (
-                    <span
-                      className="absolute top-1.5 left-1.5 w-2 h-2 rounded-full"
-                      style={{ background: 'var(--danger)' }}
-                    />
+                    <span className="absolute top-1.5 left-1.5 w-2 h-2 rounded-full" style={{ background: 'var(--danger)' }} />
                   )}
                 </button>
                 {notifOpen && (
