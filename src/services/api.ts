@@ -1,8 +1,3 @@
-/**
- * When VITE_API_URL is set (even to empty string ""), use it.
- * Empty string → relative URLs (same origin) — correct for Docker production.
- * Unset → fall back to local backend during `npm run dev`.
- */
 const envUrl = import.meta.env.VITE_API_URL as string | undefined;
 const API_BASE = typeof envUrl === 'string' ? envUrl : 'http://localhost:3001';
 
@@ -15,9 +10,12 @@ export interface ApiMember {
   birthday?: string | null;
   personnel_code?: string | null;
   coach_name?: string | null;
+  coach_id?: number | null;
   attendance_count?: number;
   membership_type?: string | null;
   start_date?: string | null;
+  monthly_fee?: number | null;
+  coach_commission_percent?: number | null;
   recent_attendances?: unknown[];
 }
 
@@ -38,9 +36,7 @@ export async function apiGet<T>(path: string): Promise<{ data: T | null; error: 
   try {
     const res = await fetch(`${API_BASE}${path}`);
     const body = await readBody(res);
-    if (!res.ok) {
-      return { data: null, error: errorMessage(body, res.statusText) };
-    }
+    if (!res.ok) return { data: null, error: errorMessage(body, res.statusText) };
     return { data: body as T, error: null };
   } catch (err) {
     return { data: null, error: err instanceof Error ? err.message : 'Network error' };
@@ -55,9 +51,7 @@ export async function apiPost<T>(path: string, payload: unknown): Promise<{ data
       body: JSON.stringify(payload),
     });
     const body = await readBody(res);
-    if (!res.ok) {
-      return { data: null, error: errorMessage(body, res.statusText) };
-    }
+    if (!res.ok) return { data: null, error: errorMessage(body, res.statusText) };
     return { data: body as T, error: null };
   } catch (err) {
     return { data: null, error: err instanceof Error ? err.message : 'Network error' };
@@ -72,9 +66,7 @@ export async function apiPut<T>(path: string, payload: unknown): Promise<{ data:
       body: JSON.stringify(payload),
     });
     const body = await readBody(res);
-    if (!res.ok) {
-      return { data: null, error: errorMessage(body, res.statusText) };
-    }
+    if (!res.ok) return { data: null, error: errorMessage(body, res.statusText) };
     return { data: body as T, error: null };
   } catch (err) {
     return { data: null, error: err instanceof Error ? err.message : 'Network error' };
@@ -85,9 +77,7 @@ export async function apiDelete(path: string): Promise<{ error: string | null }>
   try {
     const res = await fetch(`${API_BASE}${path}`, { method: 'DELETE' });
     const body = await readBody(res);
-    if (!res.ok) {
-      return { error: errorMessage(body, res.statusText) };
-    }
+    if (!res.ok) return { error: errorMessage(body, res.statusText) };
     return { error: null };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Network error' };

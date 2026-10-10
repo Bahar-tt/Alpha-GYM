@@ -15,6 +15,9 @@ export interface MemberFormPayload {
   notes: string;
   personnel_code?: string;
   coach_name?: string;
+  coach_id?: number | null;
+  monthly_fee?: number;
+  coach_commission_percent?: number;
 }
 
 export interface MemberRecord extends MemberFormPayload {
@@ -45,6 +48,9 @@ function apiToRecord(row: ApiMember): MemberRecord {
     notes: '',
     personnel_code: row.personnel_code ? String(row.personnel_code) : '',
     coach_name: row.coach_name ? String(row.coach_name) : '',
+    coach_id: row.coach_id != null ? Number(row.coach_id) : null,
+    monthly_fee: Number(row.monthly_fee) || 0,
+    coach_commission_percent: Number(row.coach_commission_percent) || 0,
     attendance_count: row.attendance_count ?? 0,
     is_active: active,
   };
@@ -59,61 +65,39 @@ function payloadToApi(payload: MemberFormPayload) {
     birthday: payload.birthday?.trim() || null,
     personnel_code: payload.personnel_code?.trim() || null,
     coach_name: payload.coach_name?.trim() || null,
+    coach_id: payload.coach_id ?? null,
     membership_type: payload.membership_type,
     start_date: payload.start_date,
+    monthly_fee: payload.monthly_fee ?? 0,
+    coach_commission_percent: payload.coach_commission_percent ?? 0,
   };
 }
 
 export async function getMembers() {
   const result = await apiGet<ApiMember[]>('/members');
-  if (result.error) {
-    return { data: null, error: { message: result.error } };
-  }
+  if (result.error) return { data: null, error: { message: result.error } };
   const list = Array.isArray(result.data) ? result.data : [];
   return { data: list.map(apiToRecord), error: null };
 }
 
 export async function getMemberById(id: string) {
   const result = await apiGet<ApiMember>(`/members/${id}`);
-  if (result.error) {
-    return { data: null, error: { message: result.error } };
-  }
-  if (!result.data) {
-    return { data: null, error: { message: 'Empty response' } };
-  }
+  if (result.error) return { data: null, error: { message: result.error } };
+  if (!result.data) return { data: null, error: { message: 'Empty response' } };
   return { data: apiToRecord(result.data), raw: result.data, error: null };
-}
-
-export async function getMemberByPersonnelCode(code: string) {
-  const result = await apiGet<ApiMember>(`/members/by-code/${encodeURIComponent(code)}`);
-  if (result.error) {
-    return { data: null, error: { message: result.error } };
-  }
-  if (!result.data) {
-    return { data: null, error: { message: 'Not found' } };
-  }
-  return { data: apiToRecord(result.data), error: null };
 }
 
 export async function addMember(member: MemberFormPayload) {
   const result = await apiPost<ApiMember>('/members', payloadToApi(member));
-  if (result.error) {
-    return { data: null, error: { message: result.error } };
-  }
-  if (!result.data) {
-    return { data: null, error: { message: 'Empty response from server' } };
-  }
+  if (result.error) return { data: null, error: { message: result.error } };
+  if (!result.data) return { data: null, error: { message: 'Empty response from server' } };
   return { data: [apiToRecord(result.data)], error: null };
 }
 
 export async function updateMember(id: string, updates: MemberFormPayload) {
   const result = await apiPut<ApiMember>(`/members/${id}`, payloadToApi(updates));
-  if (result.error) {
-    return { data: null, error: { message: result.error } };
-  }
-  if (!result.data) {
-    return { data: null, error: { message: 'Empty response from server' } };
-  }
+  if (result.error) return { data: null, error: { message: result.error } };
+  if (!result.data) return { data: null, error: { message: 'Empty response from server' } };
   return { data: [apiToRecord(result.data)], error: null };
 }
 
@@ -123,9 +107,7 @@ export async function updateMemberExpiry(id: string, expiryDate: string, weeklyS
     return { error: { message: getOne.error || 'Failed to load member' } };
   }
   const existing = getOne.data.find((m) => String(m.id) === id);
-  if (!existing) {
-    return { error: { message: 'Member not found' } };
-  }
+  if (!existing) return { error: { message: 'Member not found' } };
   return apiPut<ApiMember>(`/members/${id}`, {
     name: existing.name,
     phone: existing.phone,
@@ -133,9 +115,12 @@ export async function updateMemberExpiry(id: string, expiryDate: string, weeklyS
     weekly_sessions: weeklySessions ?? existing.weekly_sessions,
     personnel_code: existing.personnel_code,
     coach_name: existing.coach_name,
+    coach_id: existing.coach_id,
     birthday: existing.birthday,
     membership_type: existing.membership_type,
     start_date: existing.start_date,
+    monthly_fee: existing.monthly_fee,
+    coach_commission_percent: existing.coach_commission_percent,
   });
 }
 
