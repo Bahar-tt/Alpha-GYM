@@ -25,6 +25,10 @@ export interface MemberFormPayload {
   training_goal?: string;
   photo_url?: string;
   national_id?: string;
+  father_name?: string;
+  sport?: string;
+  height_cm?: number;
+  weight_kg?: number;
 }
 
 export interface MemberRecord extends MemberFormPayload {
@@ -65,6 +69,10 @@ function apiToRecord(row: ApiMember): MemberRecord {
     training_goal: row.training_goal ? String(row.training_goal) : '',
     photo_url: row.photo_url ? String(row.photo_url) : '',
     national_id: row.national_id ? String(row.national_id) : '',
+    father_name: row.father_name ? String(row.father_name) : '',
+    sport: row.sport ? String(row.sport) : '',
+    height_cm: row.height_cm != null ? Number(row.height_cm) : 0,
+    weight_kg: row.weight_kg != null ? Number(row.weight_kg) : 0,
     attendance_count: row.attendance_count ?? 0,
     is_active: active,
   };
@@ -91,6 +99,10 @@ function payloadToApi(payload: MemberFormPayload) {
     training_goal: payload.training_goal?.trim() || null,
     photo_url: payload.photo_url?.trim() || null,
     national_id: payload.national_id?.trim() || null,
+    father_name: payload.father_name?.trim() || null,
+    sport: payload.sport?.trim() || null,
+    height_cm: payload.height_cm || null,
+    weight_kg: payload.weight_kg || null,
   };
 }
 
@@ -154,6 +166,10 @@ export async function updateMemberExpiry(
     training_goal: existing.training_goal,
     photo_url: existing.photo_url,
     national_id: existing.national_id,
+    father_name: existing.father_name,
+    sport: existing.sport,
+    height_cm: existing.height_cm,
+    weight_kg: existing.weight_kg,
     _renewal: opts
       ? { amount: opts.amount ?? existing.monthly_fee ?? 0, months: opts.months ?? 1 }
       : undefined,

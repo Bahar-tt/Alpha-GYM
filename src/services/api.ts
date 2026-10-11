@@ -23,6 +23,10 @@ export interface ApiMember {
   training_goal?: string | null;
   photo_url?: string | null;
   national_id?: string | null;
+  father_name?: string | null;
+  sport?: string | null;
+  height_cm?: number | null;
+  weight_kg?: number | null;
   recent_attendances?: unknown[];
 }
 
