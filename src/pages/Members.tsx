@@ -3,6 +3,7 @@ import {
   addMember,
   deleteMember,
   getMembers,
+  getMemberById,
   updateMember,
   recordAttendance,
   type MemberFormPayload,
@@ -10,6 +11,7 @@ import {
   type MembershipType,
 } from '../services/memberService';
 import { getCoaches, type Coach } from '../services/coachService';
+import { getMemberReceipts, receiptPublicUrl, type Receipt } from '../services/receiptService';
 import { getApiErrorMessage } from '../lib/errors';
 import {
   addJalaliMonths,
@@ -27,6 +29,8 @@ import {
 } from '../lib/membershipStatus';
 import { loadJson } from '../lib/localStore';
 import JalaliDatePicker from '../components/JalaliDatePicker';
+import ProfileExtrasFields, { emptyExtras, type ProfileExtras } from '../components/ProfileExtrasFields';
+import PrintCardButton from '../components/PrintCardButton';
 import {
   Pencil,
   Trash2,
@@ -35,6 +39,8 @@ import {
   X,
   Eye,
   Fingerprint,
+  ExternalLink,
+  CalendarCheck,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -57,16 +63,15 @@ interface MemberForm {
   personnel_code: string;
   coach_id: string;
   coach_name: string;
-  has_insurance: boolean;
-  insurance_notes: string;
+  monthly_fee: number;
+  coach_commission_percent: number;
   weekly_sessions: number;
+  extras: ProfileExtras;
 }
 
 interface RenewalLog {
   member_id: string;
   status: string;
-  created_at?: string;
-  months?: number;
 }
 
 function parseBirthdayToJalali(raw: string): JalaliDate | null {
@@ -114,9 +119,10 @@ const emptyForm = (): MemberForm => ({
   personnel_code: '',
   coach_id: '',
   coach_name: '',
-  has_insurance: false,
-  insurance_notes: '',
+  monthly_fee: 0,
+  coach_commission_percent: 0,
   weekly_sessions: 3,
+  extras: emptyExtras(),
 });
 
 function isValidNationalId(code: string): boolean {
@@ -154,7 +160,9 @@ export default function Members() {
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [profileMember, setProfileMember] = useState<Member | null>(null);
+  const [profileReceipts, setProfileReceipts] = useState<Receipt[]>([]);
   const [coaches, setCoaches] = useState<Coach[]>([]);
+  const [checkInBusy, setCheckInBusy] = useState(false);
 
   const archivedIds = useMemo(
     () => new Set(loadJson<string[]>(ARCHIVED_KEY, [])),
@@ -188,6 +196,14 @@ export default function Members() {
     setLoading(false);
   };
 
+  const openProfile = async (m: Member) => {
+    setProfileMember(m);
+    setProfileReceipts([]);
+    const [detail, receipts] = await Promise.all([getMemberById(m.id), getMemberReceipts(m.id)]);
+    if (detail.data) setProfileMember(detail.data);
+    if (receipts.data) setProfileReceipts(receipts.data);
+  };
+
   const filteredMembers = members.filter((m) => {
     const q = search.toLowerCase();
     return (
@@ -218,9 +234,17 @@ export default function Members() {
       personnel_code: member.personnel_code || '',
       coach_id: member.coach_id != null ? String(member.coach_id) : '',
       coach_name: member.coach_name || '',
-      has_insurance: !!member.has_insurance,
-      insurance_notes: member.insurance_notes || '',
+      monthly_fee: Number(member.monthly_fee) || 0,
+      coach_commission_percent: Number(member.coach_commission_percent) || 0,
       weekly_sessions: member.weekly_sessions ?? 3,
+      extras: {
+        has_insurance: !!member.has_insurance,
+        insurance_notes: member.insurance_notes || '',
+        referrer_name: member.referrer_name || '',
+        referral_source: member.referral_source || '',
+        training_goal: member.training_goal || '',
+        photo_url: member.photo_url || '',
+      },
     });
     setFormError('');
     setShowModal(true);
@@ -276,8 +300,14 @@ export default function Members() {
       coach_id: form.coach_id ? Number(form.coach_id) : null,
       coach_name: form.coach_name.trim(),
       national_id: form.national_id.trim(),
-      has_insurance: form.has_insurance,
-      insurance_notes: form.insurance_notes.trim(),
+      monthly_fee: form.monthly_fee,
+      coach_commission_percent: form.coach_commission_percent,
+      has_insurance: form.extras.has_insurance,
+      insurance_notes: form.extras.insurance_notes.trim(),
+      referrer_name: form.extras.referrer_name.trim(),
+      referral_source: form.extras.referral_source.trim(),
+      training_goal: form.extras.training_goal.trim(),
+      photo_url: form.extras.photo_url.trim(),
     };
   };
 
@@ -317,6 +347,25 @@ export default function Members() {
     else fetchMembers();
   };
 
+  const handleCheckIn = async (m: Member) => {
+    if (!m.personnel_code) {
+      alert('این عضو کد پرسنلی ندارد');
+      return;
+    }
+    setCheckInBusy(true);
+    const { error } = await recordAttendance({
+      personnel_code: m.personnel_code,
+      member_id: m.id,
+      source: 'manual',
+    });
+    setCheckInBusy(false);
+    if (error) alert(typeof error === 'string' ? error : getApiErrorMessage(error));
+    else {
+      await fetchMembers();
+      if (profileMember?.id === m.id) await openProfile(m);
+    }
+  };
+
   const previewEnd = editing
     ? form.membership_type === editing.membership_type
       ? formatJalali(editing.end_date)
@@ -331,10 +380,6 @@ export default function Members() {
   const previewStart = editing
     ? formatJalali(editing.start_date || editing.end_date)
     : formatJalaliDisplay(startJalali);
-
-  const modalStatus = editing
-    ? getMembershipStatus(editing.end_date, archivedIds.has(editing.id))
-    : { kind: 'active' as const, label: 'پس از ثبت: فعال', needsRenewal: false, daysLeft: 30 };
 
   const profileRenewalCount = profileMember
     ? renewalLogs.filter((l) => l.member_id === profileMember.id && l.status === 'completed').length
@@ -386,7 +431,7 @@ export default function Members() {
                   return (
                     <tr key={m.id} className={rowClass}>
                       <td className="px-4 py-3.5">
-                        <button type="button" onClick={() => setProfileMember(m)} className="flex items-center gap-3 text-right hover:opacity-80">
+                        <button type="button" onClick={() => openProfile(m)} className="flex items-center gap-3 text-right hover:opacity-80">
                           <div className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0" style={{ background: st.kind === 'active' ? 'var(--accent-soft)' : 'var(--danger-soft)', color: st.kind === 'active' ? 'var(--accent)' : 'var(--danger)' }}>
                             {m.full_name?.charAt(0) || '?'}
                           </div>
@@ -406,7 +451,10 @@ export default function Members() {
                       <td className="px-4 py-3.5"><StatusBadge endDate={m.end_date} archived={archived} /></td>
                       <td className="px-4 py-3.5">
                         <div className="flex gap-1 justify-end">
-                          <button type="button" onClick={() => setProfileMember(m)} className="p-2 rounded-lg" style={{ color: 'var(--accent)' }}><Eye size={15} /></button>
+                          <button type="button" title="ثبت حضور" onClick={() => handleCheckIn(m)} className="p-2 rounded-lg" style={{ color: 'var(--success)' }}>
+                            <CalendarCheck size={15} />
+                          </button>
+                          <button type="button" onClick={() => openProfile(m)} className="p-2 rounded-lg" style={{ color: 'var(--accent)' }}><Eye size={15} /></button>
                           <button type="button" onClick={() => openEdit(m)} className="p-2 rounded-lg" style={{ color: 'var(--text-muted)' }}><Pencil size={15} /></button>
                           <button type="button" onClick={() => handleDelete(m.id)} className="p-2 rounded-lg" style={{ color: 'var(--text-muted)' }}><Trash2 size={15} /></button>
                         </div>
@@ -476,7 +524,13 @@ export default function Members() {
                   onChange={(e) => {
                     const id = e.target.value;
                     const c = coaches.find((x) => String(x.id) === id);
-                    setForm({ ...form, coach_id: id, coach_name: c ? c.full_name : '' });
+                    setForm({
+                      ...form,
+                      coach_id: id,
+                      coach_name: c ? c.full_name : '',
+                      coach_commission_percent:
+                        form.coach_commission_percent || (c ? Number(c.commission_percent) || 0 : 0),
+                    });
                   }}
                 >
                   <option value="">بدون مربی / انتخاب کنید</option>
@@ -486,19 +540,17 @@ export default function Members() {
                     </option>
                   ))}
                 </select>
-                {coaches.length === 0 && (
-                  <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>ابتدا از بخش مربیان، مربی ثبت کنید</p>
-                )}
               </div>
 
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--text)' }}>
-                  <input type="checkbox" checked={form.has_insurance} onChange={(e) => setForm({ ...form, has_insurance: e.target.checked })} />
-                  بیمه ورزشی دارد
-                </label>
-                {form.has_insurance && (
-                  <input className="input-field" placeholder="توضیحات بیمه (شماره، شرکت، تاریخ انقضا...)" value={form.insurance_notes} onChange={(e) => setForm({ ...form, insurance_notes: e.target.value })} />
-                )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>هزینه ماهانه (تومان)</label>
+                  <input type="number" min={0} className="input-field" value={form.monthly_fee} onChange={(e) => setForm({ ...form, monthly_fee: Number(e.target.value) || 0 })} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>درصد حق مربی</label>
+                  <input type="number" min={0} max={100} className="input-field" value={form.coach_commission_percent} onChange={(e) => setForm({ ...form, coach_commission_percent: Number(e.target.value) || 0 })} />
+                </div>
               </div>
 
               <JalaliDatePicker label="تاریخ تولد" value={form.birthday_jalali} onChange={(d) => setForm({ ...form, birthday_jalali: d })} required placeholder="انتخاب از تقویم شمسی" />
@@ -528,6 +580,8 @@ export default function Members() {
                   <strong style={{ color: 'var(--text)' }}>{previewEnd}</strong>
                 </div>
               </div>
+
+              <ProfileExtrasFields value={form.extras} onChange={(extras) => setForm({ ...form, extras })} />
             </div>
 
             <div className="shrink-0 px-6 py-4 flex flex-row-reverse gap-2" style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-muted)' }}>
@@ -543,23 +597,86 @@ export default function Members() {
           <div className="w-full max-w-lg rounded-2xl overflow-hidden" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', maxHeight: '90vh' }}>
             <div className="px-6 py-5" style={{ background: 'linear-gradient(135deg,#0c8ce7,#006fc5)' }}>
               <div className="flex justify-between items-start">
-                <div>
-                  <h2 className="text-lg font-bold text-white">{profileMember.full_name}</h2>
-                  <p className="text-white/70 text-sm" dir="ltr">{profileMember.phone}</p>
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-white/20 overflow-hidden flex items-center justify-center text-white text-lg font-bold">
+                    {profileMember.photo_url ? (
+                      <img src={profileMember.photo_url} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      profileMember.full_name.charAt(0)
+                    )}
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-white">{profileMember.full_name}</h2>
+                    <p className="text-white/70 text-sm" dir="ltr">{profileMember.phone}</p>
+                  </div>
                 </div>
                 <button type="button" onClick={() => setProfileMember(null)} className="text-white/80"><X size={18} /></button>
               </div>
             </div>
-            <div className="p-5 space-y-2 overflow-y-auto" style={{ maxHeight: 'calc(90vh - 100px)' }}>
+            <div className="p-5 space-y-2 overflow-y-auto" style={{ maxHeight: 'calc(90vh - 120px)' }}>
               <ProfileRow label="کد ملی" value={profileMember.national_id || '—'} />
               <ProfileRow label="کد پرسنلی" value={profileMember.personnel_code || '—'} />
               <ProfileRow label="مربی" value={profileMember.coach_name || 'تعیین نشده'} />
+              <ProfileRow label="شهریه ماهانه" value={`${(Number(profileMember.monthly_fee) || 0).toLocaleString('fa-IR')} تومان`} />
+              <ProfileRow label="درصد حق مربی" value={`${(Number(profileMember.coach_commission_percent) || 0).toLocaleString('fa-IR')}%`} />
               <ProfileRow label="بیمه ورزشی" value={profileMember.has_insurance ? (profileMember.insurance_notes || 'دارد') : 'ندارد'} />
+              <ProfileRow label="نام معرف" value={profileMember.referrer_name || '—'} />
+              <ProfileRow label="منبع آشنایی" value={profileMember.referral_source || '—'} />
+              <ProfileRow label="هدف تمرینی" value={profileMember.training_goal || '—'} />
               <ProfileRow label="نوع عضویت" value={membershipLabels[profileMember.membership_type] || profileMember.membership_type} />
               <ProfileRow label="پایان عضویت" value={formatJalali(profileMember.end_date)} />
               <ProfileRow label="تمدیدها" value={profileRenewalCount.toLocaleString('fa-IR')} />
               <ProfileRow label="حضورها" value={(profileMember.attendance_count || 0).toLocaleString('fa-IR')} />
-              <button type="button" className="btn-outline w-full mt-3" onClick={() => { setProfileMember(null); openEdit(profileMember); }}>ویرایش</button>
+
+              <div className="pt-2 space-y-2">
+                <p className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>فیش‌های مالی</p>
+                {profileReceipts.length === 0 ? (
+                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>فیشی ثبت نشده</p>
+                ) : (
+                  profileReceipts.map((r) => (
+                    <a
+                      key={r.id}
+                      href={receiptPublicUrl(r.token)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-between p-2.5 rounded-xl text-xs"
+                      style={{ background: 'var(--bg-muted)', color: 'var(--text)' }}
+                    >
+                      <span>
+                        {r.type === 'renewal' ? 'تمدید' : 'ثبت‌نام'} — {Math.round(r.amount).toLocaleString('fa-IR')} تومان
+                      </span>
+                      <ExternalLink size={12} style={{ color: 'var(--accent)' }} />
+                    </a>
+                  ))
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2 pt-3">
+                <PrintCardButton
+                  data={{
+                    full_name: profileMember.full_name,
+                    phone: profileMember.phone,
+                    personnel_code: profileMember.personnel_code,
+                    membership_type: profileMember.membership_type,
+                    end_date: profileMember.end_date,
+                    coach_name: profileMember.coach_name,
+                    photo_url: profileMember.photo_url,
+                    role: 'member',
+                  }}
+                />
+                <button
+                  type="button"
+                  className="btn-outline w-full"
+                  disabled={checkInBusy || !profileMember.personnel_code}
+                  onClick={() => handleCheckIn(profileMember)}
+                >
+                  <CalendarCheck size={14} />
+                  {checkInBusy ? '...' : 'ثبت حضور دستی'}
+                </button>
+                <button type="button" className="btn-outline w-full" onClick={() => { setProfileMember(null); openEdit(profileMember); }}>
+                  ویرایش
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -570,9 +687,9 @@ export default function Members() {
 
 function ProfileRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between py-2 px-3 rounded-xl" style={{ background: 'var(--bg-muted)' }}>
-      <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{label}</span>
-      <span className="text-sm font-medium" style={{ color: 'var(--text)' }}>{value}</span>
+    <div className="flex justify-between py-2 px-3 rounded-xl gap-3" style={{ background: 'var(--bg-muted)' }}>
+      <span className="text-xs shrink-0" style={{ color: 'var(--text-muted)' }}>{label}</span>
+      <span className="text-sm font-medium text-left" style={{ color: 'var(--text)' }}>{value}</span>
     </div>
   );
 }
