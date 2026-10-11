@@ -2,12 +2,16 @@ import { formatJalali } from '../lib/jalaliDate';
 
 export interface CardData {
   full_name: string;
+  father_name?: string;
+  national_id?: string;
   phone?: string;
   personnel_code?: string;
+  birthday?: string;
   membership_type?: string;
   end_date?: string;
   coach_name?: string;
   specialty?: string;
+  sport?: string;
   photo_url?: string | null;
   role?: 'member' | 'coach';
   gymName?: string;
@@ -20,7 +24,6 @@ const typeLabels: Record<string, string> = {
   vip: 'VIP',
 };
 
-/** کارت عضویت آماده چاپ — در مودال یا صفحه جدا */
 export default function MembershipCard({ data }: { data: CardData }) {
   const gym = data.gymName || 'Alpha GYM';
   const role = data.role || 'member';
@@ -42,14 +45,14 @@ export default function MembershipCard({ data }: { data: CardData }) {
       `}</style>
       <div
         style={{
-          width: 340,
-          minHeight: 210,
-          borderRadius: 16,
+          width: 380,
+          minHeight: 240,
+          borderRadius: 18,
           overflow: 'hidden',
-          background: 'linear-gradient(135deg, #0b1220 0%, #0c4a6e 55%, #0c8ce7 100%)',
+          background: 'linear-gradient(145deg, #0b1220 0%, #0c4a6e 50%, #0c8ce7 100%)',
           color: '#fff',
           fontFamily: 'Vazirmatn, Tahoma, sans-serif',
-          boxShadow: '0 12px 40px rgba(12,140,231,0.25)',
+          boxShadow: '0 16px 48px rgba(12,140,231,0.3)',
           direction: 'rtl',
         }}
       >
@@ -57,9 +60,9 @@ export default function MembershipCard({ data }: { data: CardData }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div
               style={{
-                width: 40,
-                height: 40,
-                borderRadius: 10,
+                width: 44,
+                height: 44,
+                borderRadius: 12,
                 background: 'rgba(255,255,255,0.15)',
                 display: 'flex',
                 alignItems: 'center',
@@ -67,10 +70,10 @@ export default function MembershipCard({ data }: { data: CardData }) {
                 overflow: 'hidden',
               }}
             >
-              <img src="/v5.png" alt="logo" style={{ width: 32, height: 32, objectFit: 'contain' }} />
+              <img src="/v5.png" alt="logo" style={{ width: 34, height: 34, objectFit: 'contain' }} />
             </div>
             <div>
-              <div style={{ fontWeight: 800, fontSize: 14 }}>{gym}</div>
+              <div style={{ fontWeight: 800, fontSize: 15 }}>{gym}</div>
               <div style={{ fontSize: 10, opacity: 0.75 }}>
                 {role === 'coach' ? 'کارت مربی' : 'کارت عضویت'}
               </div>
@@ -92,12 +95,12 @@ export default function MembershipCard({ data }: { data: CardData }) {
           </div>
         </div>
 
-        <div style={{ padding: '0 16px 16px', display: 'flex', gap: 14, alignItems: 'center' }}>
+        <div style={{ padding: '0 16px 12px', display: 'flex', gap: 14 }}>
           <div
             style={{
-              width: 72,
-              height: 72,
-              borderRadius: 14,
+              width: 80,
+              height: 96,
+              borderRadius: 12,
               background: 'rgba(255,255,255,0.12)',
               border: '2px solid rgba(255,255,255,0.25)',
               overflow: 'hidden',
@@ -115,23 +118,24 @@ export default function MembershipCard({ data }: { data: CardData }) {
               (data.full_name || '?').charAt(0)
             )}
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 6 }}>{data.full_name}</div>
-            {data.phone && (
-              <div style={{ fontSize: 12, opacity: 0.85, direction: 'ltr', textAlign: 'right' }}>{data.phone}</div>
+          <div style={{ flex: 1, minWidth: 0, fontSize: 11, lineHeight: 1.65 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 4 }}>{data.full_name}</div>
+            {data.father_name && <div style={{ opacity: 0.85 }}>نام پدر: {data.father_name}</div>}
+            {data.national_id && (
+              <div style={{ opacity: 0.85 }} dir="ltr">
+                کد ملی: {data.national_id}
+              </div>
             )}
             {data.personnel_code && (
-              <div style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }} dir="ltr">
-                کد: {data.personnel_code}
+              <div style={{ opacity: 0.85 }} dir="ltr">
+                کد پرسنلی: {data.personnel_code}
               </div>
             )}
+            {data.birthday && <div style={{ opacity: 0.85 }}>تولد: {data.birthday}</div>}
             {role === 'member' && data.end_date && (
-              <div style={{ fontSize: 11, marginTop: 6, color: '#f5d78e' }}>
+              <div style={{ marginTop: 4, color: '#f5d78e', fontWeight: 700 }}>
                 اعتبار تا {formatJalali(data.end_date)}
               </div>
-            )}
-            {role === 'member' && data.coach_name && (
-              <div style={{ fontSize: 11, marginTop: 2, opacity: 0.8 }}>مربی: {data.coach_name}</div>
             )}
           </div>
         </div>
@@ -141,12 +145,12 @@ export default function MembershipCard({ data }: { data: CardData }) {
             borderTop: '1px solid rgba(255,255,255,0.12)',
             padding: '8px 16px',
             fontSize: 10,
-            opacity: 0.65,
+            opacity: 0.7,
             display: 'flex',
             justifyContent: 'space-between',
           }}
         >
-          <span>alphagym</span>
+          <span>Alpha GYM</span>
           <span>قابل ارائه در پذیرش</span>
         </div>
       </div>
