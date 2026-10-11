@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { IdCard, Printer, X } from 'lucide-react';
+import { CreditCard, Printer, X } from 'lucide-react';
 import MembershipCard, { type CardData } from './MembershipCard';
 
 export default function PrintCardButton({ data }: { data: CardData }) {
@@ -8,7 +8,7 @@ export default function PrintCardButton({ data }: { data: CardData }) {
   return (
     <>
       <button type="button" className="btn-outline text-xs py-2" onClick={() => setOpen(true)}>
-        <IdCard size={14} />
+        <CreditCard size={14} />
         چاپ کارت عضویت
       </button>
 
