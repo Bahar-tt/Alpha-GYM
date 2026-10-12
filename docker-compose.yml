@@ -7,12 +7,15 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=8000
+      # Persistent disk: mount host/volume disk to /app/data
+      - DATA_DIR=/app/data
       - DB_PATH=/app/data/gym.db
       - KAVENEGAR_API_KEY=${KAVENEGAR_API_KEY}
       - KAVENEGAR_SENDER=${KAVENEGAR_SENDER:-20006000853}
       - SMS_SEND_DELAY_MS=${SMS_SEND_DELAY_MS:-400}
     volumes:
-      # Only the SQLite database is persisted
+      # IMPORTANT: all data (SQLite + member/coach photos) lives here
+      # On Cloudflare / Railway: set volume mount path = /app/data
       - alpha-gym-data:/app/data
     restart: unless-stopped
 

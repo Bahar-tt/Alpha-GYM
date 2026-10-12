@@ -39,11 +39,12 @@ COPY backend/ ./backend/
 # Copy built frontend
 COPY --from=frontend-builder /app/dist ./dist
 
-# Persist SQLite here (mounted as volume)
-RUN mkdir -p /app/data
+# Persistent data directory (DB + uploads). Mount a volume/disk at /app/data
+RUN mkdir -p /app/data/uploads
 
 ENV NODE_ENV=production
 ENV PORT=8000
+ENV DATA_DIR=/app/data
 ENV DB_PATH=/app/data/gym.db
 
 EXPOSE 8000
