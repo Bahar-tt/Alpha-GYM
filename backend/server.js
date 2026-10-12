@@ -15,19 +15,29 @@ const { registerSystemRoutes } = require('./routes/system');
 
 const PORT = Number(process.env.PORT) || 8000;
 const ENV = process.env.NODE_ENV || 'development';
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'gym.db');
+// Persistent disk mount point (Cloudflare / Railway / Docker volume)
+const DATA_DIR = process.env.DATA_DIR || (process.env.DB_PATH ? path.dirname(process.env.DB_PATH) : '/app/data');
+const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'gym.db');
+const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 
 console.log(`[ENV] Running in ${ENV}`);
+console.log(`[DATA] DATA_DIR=${DATA_DIR}`);
 console.log(`[DB] Using database at ${DB_PATH}`);
+console.log(`[UPLOADS] Photos at ${UPLOADS_DIR}`);
 
-const dbDir = path.dirname(DB_PATH);
-if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({ limit: '8mb' }));
+// Serve uploaded photos from persistent disk
+app.use('/uploads', express.static(UPLOADS_DIR));
 
 const db = new Database(DB_PATH);
+// Better durability across process restarts
+db.pragma('journal_mode = WAL');
+db.pragma('synchronous = NORMAL');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS members (
@@ -67,6 +77,10 @@ addCol('referral_source', 'TEXT');
 addCol('training_goal', 'TEXT');
 addCol('photo_url', 'TEXT');
 addCol('national_id', 'TEXT');
+addCol('father_name', 'TEXT');
+addCol('sport', 'TEXT');
+addCol('height_cm', 'REAL');
+addCol('weight_kg', 'REAL');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS coaches (
@@ -128,13 +142,36 @@ function delay(ms) {
 }
 const SMS_SEND_DELAY_MS = Number(process.env.SMS_SEND_DELAY_MS) || 400;
 
+/** Save data-URL or keep existing URL; returns path under /uploads or original string */
+function persistPhoto(photo, prefix = 'member') {
+  if (!photo || typeof photo !== 'string') return null;
+  const s = photo.trim();
+  if (!s) return null;
+  // already a stored path or external URL
+  if (s.startsWith('/uploads/') || s.startsWith('http://') || s.startsWith('https://')) return s;
+  // data URL → write file on persistent disk
+  const m = s.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!m) return s; // unknown format, store as-is
+  const ext = (m[1].split('/')[1] || 'jpg').replace('jpeg', 'jpg').split('+')[0];
+  const name = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const filePath = path.join(UPLOADS_DIR, name);
+  try {
+    fs.writeFileSync(filePath, Buffer.from(m[2], 'base64'));
+    console.log(`[UPLOAD] saved ${name}`);
+    return `/uploads/${name}`;
+  } catch (e) {
+    console.error('[UPLOAD] failed', e);
+    return s; // fallback to storing data URL in DB
+  }
+}
+
 cron.schedule('0 9 * * *', () => {
   const today = todayIso();
   const expired = db.prepare('SELECT * FROM members WHERE expiry_date < ? ORDER BY expiry_date').all(today);
   console.log(`[cron] Expired members: ${expired.length}`);
 }, { timezone: 'Asia/Tehran' });
 
-app.get('/health', (_req, res) => res.json({ ok: true }));
+app.get('/health', (_req, res) => res.json({ ok: true, data_dir: DATA_DIR, db_path: DB_PATH }));
 
 const { createReceipt } = registerReceiptRoutes(app, db);
 registerAccountingRoutes(app, db);
@@ -170,7 +207,7 @@ app.post('/coaches', (req, res) => {
       Number(b.commission_percent) || 0, b.notes ? String(b.notes).trim() : null, b.is_active === false || b.is_active === 0 ? 0 : 1,
       b.has_insurance ? 1 : 0, b.insurance_notes ? String(b.insurance_notes).trim() : null,
       b.referrer_name ? String(b.referrer_name).trim() : null, b.referral_source ? String(b.referral_source).trim() : null,
-      b.training_goal ? String(b.training_goal).trim() : null, b.photo_url ? String(b.photo_url).trim() : null,
+      b.training_goal ? String(b.training_goal).trim() : null, persistPhoto(b.photo_url, 'coach'),
     );
     res.status(201).json(db.prepare('SELECT * FROM coaches WHERE id = ?').get(result.lastInsertRowid));
   } catch (err) { console.error(err); res.status(500).json({ error: 'Failed to create coach' }); }
@@ -182,6 +219,9 @@ app.put('/coaches/:id', (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Coach not found' });
   const b = req.body || {};
   try {
+    const photoVal = b.photo_url !== undefined
+      ? (b.photo_url ? persistPhoto(String(b.photo_url), 'coach') : null)
+      : existing.photo_url;
     db.prepare(`UPDATE coaches SET full_name=?, phone=?, specialty=?, commission_percent=?, notes=?, is_active=?, has_insurance=?, insurance_notes=?, referrer_name=?, referral_source=?, training_goal=?, photo_url=? WHERE id=?`).run(
       b.full_name != null ? String(b.full_name).trim() : existing.full_name,
       b.phone !== undefined ? (b.phone ? String(b.phone).trim() : null) : existing.phone,
@@ -194,7 +234,7 @@ app.put('/coaches/:id', (req, res) => {
       b.referrer_name !== undefined ? (b.referrer_name ? String(b.referrer_name).trim() : null) : existing.referrer_name,
       b.referral_source !== undefined ? (b.referral_source ? String(b.referral_source).trim() : null) : existing.referral_source,
       b.training_goal !== undefined ? (b.training_goal ? String(b.training_goal).trim() : null) : existing.training_goal,
-      b.photo_url !== undefined ? (b.photo_url ? String(b.photo_url).trim() : null) : existing.photo_url, id,
+      photoVal, id,
     );
     const updated = db.prepare('SELECT * FROM coaches WHERE id = ?').get(id);
     db.prepare('UPDATE members SET coach_name = ? WHERE coach_id = ?').run(updated.full_name, id);
@@ -259,12 +299,14 @@ app.post('/members', (req, res) => {
   }
   const coachFields = resolveCoachFields(b.coach_id, b.coach_name);
   try {
+    const photoPath = persistPhoto(b.photo_url, 'member');
     const result = db.prepare(`
       INSERT INTO members (
         name, phone, expiry_date, weekly_sessions, birthday, personnel_code, coach_name, coach_id,
         attendance_count, membership_type, start_date, monthly_fee, coach_commission_percent,
-        has_insurance, insurance_notes, referrer_name, referral_source, training_goal, photo_url, national_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        has_insurance, insurance_notes, referrer_name, referral_source, training_goal, photo_url, national_id,
+        father_name, sport, height_cm, weight_kg
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       String(b.name).trim(), String(b.phone).trim(), String(b.expiry_date).trim(), Number(b.weekly_sessions) || 0,
       b.birthday ? String(b.birthday).trim() : null, code || null, coachFields.coach_name, coachFields.coach_id,
@@ -276,8 +318,12 @@ app.post('/members', (req, res) => {
       b.referrer_name ? String(b.referrer_name).trim() : null,
       b.referral_source ? String(b.referral_source).trim() : null,
       b.training_goal ? String(b.training_goal).trim() : null,
-      b.photo_url ? String(b.photo_url).trim() : null,
+      photoPath,
       b.national_id ? String(b.national_id).trim() : null,
+      b.father_name ? String(b.father_name).trim() : null,
+      b.sport ? String(b.sport).trim() : null,
+      b.height_cm != null ? Number(b.height_cm) : null,
+      b.weight_kg != null ? Number(b.weight_kg) : null,
     );
     const row = db.prepare('SELECT * FROM members WHERE id = ?').get(result.lastInsertRowid);
     onMemberCreated(row);
@@ -307,12 +353,16 @@ app.put('/members/:id', (req, res) => {
     : { coach_id: existing.coach_id, coach_name: existing.coach_name };
   const oldExpiry = existing.expiry_date;
   try {
+    const photoPath = b.photo_url !== undefined
+      ? (b.photo_url ? persistPhoto(String(b.photo_url), 'member') : null)
+      : existing.photo_url;
     db.prepare(`
       UPDATE members SET
         name=?, phone=?, expiry_date=?, weekly_sessions=?, birthday=?, personnel_code=?,
         coach_name=?, coach_id=?, membership_type=?, start_date=?, attendance_count=?,
         monthly_fee=?, coach_commission_percent=?,
-        has_insurance=?, insurance_notes=?, referrer_name=?, referral_source=?, training_goal=?, photo_url=?, national_id=?
+        has_insurance=?, insurance_notes=?, referrer_name=?, referral_source=?, training_goal=?, photo_url=?, national_id=?,
+        father_name=?, sport=?, height_cm=?, weight_kg=?
       WHERE id=?
     `).run(
       b.name != null ? String(b.name).trim() : existing.name,
@@ -332,8 +382,12 @@ app.put('/members/:id', (req, res) => {
       b.referrer_name !== undefined ? (b.referrer_name ? String(b.referrer_name).trim() : null) : existing.referrer_name,
       b.referral_source !== undefined ? (b.referral_source ? String(b.referral_source).trim() : null) : existing.referral_source,
       b.training_goal !== undefined ? (b.training_goal ? String(b.training_goal).trim() : null) : existing.training_goal,
-      b.photo_url !== undefined ? (b.photo_url ? String(b.photo_url).trim() : null) : existing.photo_url,
+      photoPath,
       b.national_id !== undefined ? (b.national_id ? String(b.national_id).trim() : null) : existing.national_id,
+      b.father_name !== undefined ? (b.father_name ? String(b.father_name).trim() : null) : existing.father_name,
+      b.sport !== undefined ? (b.sport ? String(b.sport).trim() : null) : existing.sport,
+      b.height_cm !== undefined ? (b.height_cm != null ? Number(b.height_cm) : null) : existing.height_cm,
+      b.weight_kg !== undefined ? (b.weight_kg != null ? Number(b.weight_kg) : null) : existing.weight_kg,
       id,
     );
     const row = db.prepare('SELECT * FROM members WHERE id = ?').get(id);
@@ -375,34 +429,27 @@ app.post('/attendance', (req, res) => {
     );
     db.prepare(`UPDATE members SET attendance_count = COALESCE(attendance_count, 0) + 1 WHERE id = ?`).run(member.id);
     res.status(201).json({ success: true, member: db.prepare('SELECT * FROM members WHERE id = ?').get(member.id) });
-  } catch (err) { res.status(500).json({ error: 'Failed to record attendance' }); }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Failed to record attendance' }); }
 });
 
-app.get('/members/:id/attendances', (req, res) => {
-  try { res.json(db.prepare('SELECT * FROM attendances WHERE member_id = ? ORDER BY attended_at DESC LIMIT 100').all(Number(req.params.id))); }
-  catch (err) { res.status(500).json({ error: 'Failed to list attendances' }); }
-});
-
-app.get('/sms-logs', (req, res) => {
-  try {
-    const { phone, member_id } = req.query;
-    let query = 'SELECT * FROM sms_logs WHERE 1=1';
-    const params = [];
-    if (phone) { query += ' AND phone LIKE ?'; params.push(`%${phone}%`); }
-    if (member_id) { query += ' AND member_id = ?'; params.push(Number(member_id)); }
-    query += ' ORDER BY id DESC';
-    res.json(db.prepare(query).all(...params));
-  } catch (err) { res.status(500).json({ error: 'Failed to fetch sms logs' }); }
+app.get('/sms/logs', (_req, res) => {
+  try { res.json(db.prepare('SELECT * FROM sms_logs ORDER BY id DESC LIMIT 500').all()); }
+  catch (err) { res.status(500).json({ error: 'Failed to list SMS logs' }); }
 });
 
 app.post('/sms/send', async (req, res) => {
-  const { member_id, name, phone, message } = req.body || {};
-  if (!phone || !String(phone).trim()) return res.status(400).json({ error: 'phone is required' });
-  if (!message || !String(message).trim()) return res.status(400).json({ error: 'message is required' });
+  const { member_id, name, phone, message, type } = req.body || {};
+  if (!phone || !message) return res.status(400).json({ error: 'phone and message are required' });
   try {
-    const ok = await sendSMS({ member_id: member_id != null ? Number(member_id) : null, name: name != null ? String(name).trim() : '', phone: String(phone).trim(), message: String(message).trim() });
+    const ok = await sendSMS({
+      member_id: member_id != null ? Number(member_id) : null,
+      name: name ? String(name).trim() : '',
+      phone: String(phone).trim(),
+      message: String(message).trim(),
+      type: type ? String(type).trim() : 'general',
+    });
     const log = db.prepare('SELECT * FROM sms_logs ORDER BY id DESC LIMIT 1').get();
-    if (!ok) return res.status(500).json({ success: false, error: 'Failed to send SMS', log: log || null });
+    if (!ok) return res.status(502).json({ success: false, error: 'Failed to send SMS', log: log || null });
     res.status(201).json({ success: true, log });
   } catch (err) { res.status(500).json({ error: 'Failed to send SMS' }); }
 });
@@ -434,7 +481,7 @@ const distPath = path.join(__dirname, '..', 'dist');
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
   app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/members') || req.path.startsWith('/coaches') || req.path.startsWith('/sms') || req.path.startsWith('/attendance') || req.path.startsWith('/accounting') || req.path.startsWith('/receipts') || req.path.startsWith('/system') || req.path.startsWith('/health')) return next();
+    if (req.path.startsWith('/members') || req.path.startsWith('/coaches') || req.path.startsWith('/sms') || req.path.startsWith('/attendance') || req.path.startsWith('/accounting') || req.path.startsWith('/receipts') || req.path.startsWith('/system') || req.path.startsWith('/health') || req.path.startsWith('/uploads')) return next();
     res.sendFile(path.join(distPath, 'index.html'));
   });
   console.log(`[STATIC] Serving frontend from ${distPath}`);
