@@ -1,5 +1,13 @@
-const envUrl = import.meta.env.VITE_API_URL as string | undefined;
-const API_BASE = typeof envUrl === 'string' ? envUrl : 'http://localhost:3001';
+/**
+ * API base URL:
+ * - Production (Docker): empty → same origin (works on ANY domain: runflare, custom, http/https)
+ * - Local dev: set VITE_API_URL=http://localhost:8000
+ */
+const raw = import.meta.env.VITE_API_URL as string | undefined;
+const API_BASE =
+  typeof raw === 'string' && raw.trim().length > 0
+    ? raw.trim().replace(/\/$/, '')
+    : ''; // relative → works with every host/domain
 
 export interface ApiMember {
   id: number;
@@ -33,7 +41,11 @@ export interface ApiMember {
 async function readBody(res: Response): Promise<unknown> {
   const text = await res.text();
   if (!text) return null;
-  return JSON.parse(text);
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }
 
 function errorMessage(body: unknown, fallback: string): string {
