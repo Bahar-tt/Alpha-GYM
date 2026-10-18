@@ -27,18 +27,16 @@ export default function Login() {
 
   return (
     <div dir="rtl" className="min-h-screen flex" style={{ background: 'var(--bg)' }}>
-      {/* Visual panel (appears on the right in RTL) — gym photo background */}
+      {/* Visual panel (RTL = right side) — gym photo background */}
       <div className="hidden lg:flex lg:w-[48%] relative overflow-hidden flex-col justify-between p-12">
-        {/* Background photo */}
         <div
           className="absolute inset-0"
           style={{
-            backgroundImage: "url('/login-bg.svg')",
+            backgroundImage: "url('/login-bg.jpg')",
             backgroundSize: 'cover',
             backgroundPosition: 'center',
           }}
         />
-        {/* Dark gradient overlay so white text stays readable */}
         <div
           className="absolute inset-0"
           style={{
@@ -84,7 +82,6 @@ export default function Login() {
         <p className="relative z-10 text-white/45 text-xs">Alpha GYM Management System</p>
       </div>
 
-      {/* Form panel */}
       <div className="flex-1 flex flex-col items-center justify-center px-6 py-12 relative">
         <button
           onClick={toggleTheme}
