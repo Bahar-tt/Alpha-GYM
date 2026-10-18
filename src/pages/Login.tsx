@@ -27,26 +27,23 @@ export default function Login() {
 
   return (
     <div dir="rtl" className="min-h-screen flex" style={{ background: 'var(--bg)' }}>
-      {/* Left visual panel */}
-      <div
-        className="hidden lg:flex lg:w-[48%] relative overflow-hidden flex-col justify-between p-12"
-        style={{
-          background: 'linear-gradient(160deg, #0c4a6e 0%, #0c8ce7 45%, #38bdf8 100%)',
-        }}
-      >
+      {/* Visual panel (appears on the right in RTL) — gym photo background */}
+      <div className="hidden lg:flex lg:w-[48%] relative overflow-hidden flex-col justify-between p-12">
+        {/* Background photo */}
         <div
-          className="absolute inset-0 opacity-20"
+          className="absolute inset-0"
           style={{
-            backgroundImage:
-              'radial-gradient(circle at 20% 30%, rgba(255,255,255,0.35) 0%, transparent 40%), radial-gradient(circle at 80% 70%, rgba(212,168,67,0.4) 0%, transparent 35%)',
+            backgroundImage: "url('/login-bg.svg')",
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
           }}
         />
+        {/* Dark gradient overlay so white text stays readable */}
         <div
-          className="absolute inset-0 opacity-[0.07]"
+          className="absolute inset-0"
           style={{
-            backgroundImage:
-              'linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)',
-            backgroundSize: '48px 48px',
+            background:
+              'linear-gradient(160deg, rgba(8,20,35,0.72) 0%, rgba(12,40,70,0.55) 45%, rgba(8,20,35,0.78) 100%)',
           }}
         />
 
@@ -68,7 +65,7 @@ export default function Login() {
             <br />
             باشگاه شما
           </h2>
-          <p className="text-white/70 text-sm leading-relaxed">
+          <p className="text-white/80 text-sm leading-relaxed">
             اعضا، تمدید، پیامک و گزارش‌ها را از یک پنل یکپارچه و مدرن مدیریت کنید.
           </p>
           <div className="flex gap-3">
@@ -76,7 +73,7 @@ export default function Login() {
               <span
                 key={t}
                 className="px-3 py-1.5 rounded-full text-xs font-medium text-white/90"
-                style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.18)' }}
+                style={{ background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.22)' }}
               >
                 {t}
               </span>
@@ -84,7 +81,7 @@ export default function Login() {
           </div>
         </div>
 
-        <p className="relative z-10 text-white/40 text-xs">Alpha GYM Management System</p>
+        <p className="relative z-10 text-white/45 text-xs">Alpha GYM Management System</p>
       </div>
 
       {/* Form panel */}
@@ -121,9 +118,7 @@ export default function Login() {
             </p>
           </div>
 
-          <div
-            className="panel-card p-6 sm:p-8"
-          >
+          <div className="panel-card p-6 sm:p-8">
             {error && (
               <div
                 className="mb-4 p-3 rounded-xl text-sm"
