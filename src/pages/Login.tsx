@@ -32,7 +32,7 @@ export default function Login() {
         <div
           className="absolute inset-0"
           style={{
-            backgroundImage: "url('/login-bg.jpg')",
+            backgroundImage: "url('/login-bg.svg')",
             backgroundSize: 'cover',
             backgroundPosition: 'center',
           }}
