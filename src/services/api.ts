@@ -49,8 +49,18 @@ async function readBody(res: Response): Promise<unknown> {
 }
 
 function errorMessage(body: unknown, fallback: string): string {
-  if (body && typeof body === 'object' && 'error' in body && typeof (body as { error: unknown }).error === 'string') {
-    return (body as { error: string }).error;
+  if (body && typeof body === 'object') {
+    const o = body as { error?: unknown; detail?: unknown; message?: unknown };
+    const main =
+      typeof o.error === 'string'
+        ? o.error
+        : typeof o.message === 'string'
+          ? o.message
+          : null;
+    const detail = typeof o.detail === 'string' ? o.detail : null;
+    if (main && detail) return `${main}: ${detail}`;
+    if (main) return main;
+    if (detail) return detail;
   }
   return fallback;
 }
