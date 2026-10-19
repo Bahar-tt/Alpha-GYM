@@ -27,30 +27,31 @@ export function sportLabel(id: string | null | undefined): string {
   return s ? s.label : id || '—';
 }
 
+const SPORT_KEYWORDS: Record<string, string[]> = {
+  bodybuilding: ['بدنسازی'],
+  functional: ['فانکشنال'],
+  freestyle: ['فری استایل', 'فری‌استایل', 'فیری استایل'],
+  hyrox: ['هایروکس', 'هیروکس'],
+  bodypump: ['بادی پامپ', 'بادی‌پامپ', 'پامپ'],
+  yoga: ['یوگا'],
+  pilates: ['پیلاتس'],
+  crossfit: ['کراسفیت', 'کراس‌فیت', 'کراس فیت'],
+  aerofitness: ['ایروفیتنس', 'ایرو فیتنس', 'ایرو'],
+  zumba: ['زومبا'],
+  persian_dance: ['رقص ایرانی', 'رقص'],
+  crossfit_bb: ['کراسفیت + بدنسازی'],
+  boxing_trx: ['بوکس', 'trx', 'تی‌آر‌ایکس', 'تی ار ایکس'],
+};
+
 /**
- * با انتخاب رشته ورزشی، مناسب‌ترین مربی (بر اساس فیلد specialty) را برمی‌گرداند.
+ * با انتخاب رشته ورزشی، مناسب‌ترین مربی را برمی‌گرداند.
  */
 export function matchCoachForSport(
   sportId: string,
   coaches: { id: number | string; full_name: string; specialty?: string | null }[],
 ): { id: string; full_name: string } | null {
   if (!sportId || !coaches?.length) return null;
-  const keywords: Record<string, string[]> = {
-    bodybuilding: ['بدنسازی'],
-    functional: ['فانکشنال'],
-    freestyle: ['فری استایل', 'فری‌استایل', 'فیری استایل'],
-    hyrox: ['هایروکس', 'هیروکس'],
-    bodypump: ['بادی پامپ', 'بادی‌پامپ', 'پامپ'],
-    yoga: ['یوگا'],
-    pilates: ['پیلاتس'],
-    crossfit: ['کراسفیت', 'کراس‌فیت', 'کراس فیت'],
-    aerofitness: ['ایروفیتنس', 'ایرو فیتنس', 'ایرو'],
-    zumba: ['زومبا'],
-    persian_dance: ['رقص ایرانی', 'رقص'],
-    crossfit_bb: ['کراسفیت + بدنسازی', 'کراسفیت', 'بدنسازی'],
-    boxing_trx: ['بوکس', 'trx', 'تی‌آر‌ایکس', 'تی ار ایکس'],
-  };
-  const keys = keywords[sportId] || [sportLabel(sportId)];
+  const keys = SPORT_KEYWORDS[sportId] || [sportLabel(sportId)];
   let best: { id: string; full_name: string; score: number } | null = null;
   for (const c of coaches) {
     const spec = (c.specialty || '').toLowerCase();
@@ -64,6 +65,29 @@ export function matchCoachForSport(
     }
   }
   return best ? { id: best.id, full_name: best.full_name } : null;
+}
+
+/**
+ * با تخصص مربی، مناسب‌ترین رشته ورزشی (id) را پیدا می‌کند.
+ */
+export function matchSportForCoach(specialty: string | null | undefined): string {
+  if (!specialty) return '';
+  const spec = specialty.toLowerCase();
+  let bestId = '';
+  let bestScore = 0;
+  for (const [id, keys] of Object.entries(SPORT_KEYWORDS)) {
+    let score = 0;
+    for (const k of keys) {
+      if (spec.includes(k.toLowerCase())) score += k.length + 5;
+    }
+    const label = sportLabel(id).toLowerCase();
+    if (spec === label || spec.includes(label)) score += 20;
+    if (score > bestScore) {
+      bestScore = score;
+      bestId = id;
+    }
+  }
+  return bestId;
 }
 
 export const REFERRAL_SOURCES = [
