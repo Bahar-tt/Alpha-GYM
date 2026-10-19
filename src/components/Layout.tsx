@@ -89,40 +89,41 @@ export default function Layout() {
         />
       )}
 
-      {/* ── Sidebar ── */}
+      {/* ── Sidebar — soft theme-aware ── */}
       <aside
         className={`sidebar-brand-bar fixed top-0 bottom-0 right-0 z-50 flex flex-col transition-transform duration-300 ease-out ${
           mobileOpen ? 'translate-x-0' : 'translate-x-full'
         } lg:!translate-x-0`}
         style={{ width: SIDEBAR_W }}
       >
-        {/* Gold top accent line */}
+        {/* Soft sky accent line */}
         <div
           className="h-[2px] shrink-0 w-full"
           style={{
-            background: 'linear-gradient(90deg, transparent, #e8c547, #c9a227, transparent)',
+            background: 'linear-gradient(90deg, transparent, var(--accent), transparent)',
+            opacity: 0.7,
           }}
         />
 
         {/* Brand */}
         <div
           className="h-16 shrink-0 px-5 flex items-center gap-3"
-          style={{ borderBottom: '1px solid rgba(212, 168, 67, 0.12)' }}
+          style={{ borderBottom: '1px solid var(--border-sidebar)' }}
         >
           <div
-            className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden shrink-0 animate-gold-pulse"
+            className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden shrink-0 animate-soft-pulse"
             style={{
-              background: 'linear-gradient(145deg, #e8c547, #c9a227 50%, #8a6b18)',
-              boxShadow: '0 4px 14px rgba(201, 162, 39, 0.35)',
+              background: 'linear-gradient(145deg, #38bdf8, #0ea5e9 50%, #0284c7)',
+              boxShadow: '0 4px 14px rgba(14, 165, 233, 0.3)',
             }}
           >
             <img src="/v5.png" alt="Alpha" className="w-8 h-8 object-contain" />
           </div>
           <div className="min-w-0 flex-1">
-            <h1 className="text-sm font-bold tracking-wide" style={{ color: '#f8fafc' }}>
+            <h1 className="text-sm font-bold tracking-wide" style={{ color: 'var(--text)' }}>
               Alpha GYM
             </h1>
-            <p className="text-[10px] flex items-center gap-1" style={{ color: '#e8c547' }}>
+            <p className="text-[10px] flex items-center gap-1" style={{ color: 'var(--accent)' }}>
               <Sparkles size={10} />
               پلتفرم هوشمند باشگاه
             </p>
@@ -130,7 +131,7 @@ export default function Layout() {
           <button
             type="button"
             className="lg:hidden p-1.5 rounded-lg"
-            style={{ color: '#94a3b8' }}
+            style={{ color: 'var(--text-muted)' }}
             onClick={() => setMobileOpen(false)}
           >
             <X size={18} />
@@ -141,7 +142,7 @@ export default function Layout() {
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <p
             className="px-3 mb-2.5 text-[10px] font-bold tracking-[0.12em] uppercase"
-            style={{ color: 'rgba(232, 197, 71, 0.55)' }}
+            style={{ color: 'var(--text-muted)' }}
           >
             منوی اصلی
           </p>
@@ -166,28 +167,27 @@ export default function Layout() {
         </nav>
 
         {/* Footer */}
-        <div className="shrink-0 p-4" style={{ borderTop: '1px solid rgba(212, 168, 67, 0.12)' }}>
+        <div className="shrink-0 p-4" style={{ borderTop: '1px solid var(--border-sidebar)' }}>
           <div
             className="mb-3 p-3 rounded-xl flex items-center gap-2.5"
             style={{
-              background: 'rgba(232, 197, 71, 0.08)',
-              border: '1px solid rgba(232, 197, 71, 0.2)',
+              background: 'var(--accent-soft)',
+              border: '1px solid color-mix(in srgb, var(--accent) 22%, transparent)',
             }}
           >
             <div
-              className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold shrink-0"
+              className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 text-white"
               style={{
-                background: 'linear-gradient(135deg, #e8c547, #c9a227)',
-                color: '#1a1400',
+                background: 'linear-gradient(135deg, #38bdf8, #0284c7)',
               }}
             >
               {displayName.charAt(0)}
             </div>
             <div className="min-w-0">
-              <p className="text-xs font-semibold truncate" style={{ color: '#f1f5f9' }}>
+              <p className="text-xs font-semibold truncate" style={{ color: 'var(--text)' }}>
                 {displayName}
               </p>
-              <p className="text-[10px]" style={{ color: '#e8c547' }}>
+              <p className="text-[10px]" style={{ color: 'var(--accent)' }}>
                 {roleLabel}
               </p>
             </div>
@@ -196,21 +196,21 @@ export default function Layout() {
             type="button"
             onClick={signOut}
             className="flex items-center gap-2 w-full h-10 px-3 text-sm rounded-xl transition-colors"
-            style={{ color: '#94a3b8' }}
+            style={{ color: 'var(--text-secondary)' }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgba(248, 113, 113, 0.12)';
-              e.currentTarget.style.color = '#f87171';
+              e.currentTarget.style.background = 'var(--danger-soft)';
+              e.currentTarget.style.color = 'var(--danger)';
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color = '#94a3b8';
+              e.currentTarget.style.color = 'var(--text-secondary)';
             }}
           >
             <LogOut size={16} />
             خروج از حساب
           </button>
-          <p className="mt-3 text-center text-[10px] font-medium" style={{ color: '#64748b' }} dir="ltr">
-            Alpha GYM <span style={{ color: '#c9a227' }}>v{appVersion}</span>
+          <p className="mt-3 text-center text-[10px] font-medium" style={{ color: 'var(--text-muted)' }} dir="ltr">
+            Alpha GYM <span style={{ color: 'var(--accent)' }}>v{appVersion}</span>
           </p>
         </div>
       </aside>
@@ -256,9 +256,9 @@ export default function Layout() {
               <div
                 className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium"
                 style={{
-                  background: 'var(--gold-soft)',
-                  color: 'var(--gold)',
-                  border: '1px solid color-mix(in srgb, var(--gold) 30%, transparent)',
+                  background: 'var(--accent-soft)',
+                  color: 'var(--accent)',
+                  border: '1px solid color-mix(in srgb, var(--accent) 28%, transparent)',
                 }}
               >
                 <Sparkles size={12} />
@@ -286,9 +286,7 @@ export default function Layout() {
                   )}
                 </button>
                 {notifOpen && (
-                  <div
-                    className="absolute left-0 top-full mt-2 w-72 rounded-2xl p-3 z-50 modal-panel"
-                  >
+                  <div className="absolute left-0 top-full mt-2 w-72 rounded-2xl p-3 z-50 modal-panel">
                     <p className="text-xs font-semibold mb-2" style={{ color: 'var(--text)' }}>
                       اعلان‌ها
                     </p>
@@ -297,7 +295,7 @@ export default function Layout() {
                       <button
                         type="button"
                         className="w-full text-right p-3 rounded-xl text-sm"
-                        style={{ background: 'var(--gold-soft)', color: 'var(--text)' }}
+                        style={{ background: 'var(--accent-soft)', color: 'var(--text)' }}
                         onClick={() => {
                           setNotifOpen(false);
                           navigate('/settings');
