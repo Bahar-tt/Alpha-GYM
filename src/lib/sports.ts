@@ -1,15 +1,18 @@
-/** رشته‌های ورزشی و شهریه ماهانه ثابت (تومان) */
+/** رشته‌های ورزشی باشگاه (متناسب با مربیان واقعی) + شهریه ماهانه (تومان) */
 export const SPORTS = [
   { id: 'bodybuilding', label: 'بدنسازی', monthly_fee: 2500000 },
-  { id: 'fitness', label: 'فیتنس عمومی', monthly_fee: 2200000 },
-  { id: 'crossfit', label: 'کراس‌فیت', monthly_fee: 2800000 },
-  { id: 'yoga', label: 'یوگا', monthly_fee: 2000000 },
-  { id: 'pilates', label: 'پیلاتس', monthly_fee: 2100000 },
-  { id: 'trx', label: 'TRX', monthly_fee: 2300000 },
-  { id: 'functional', label: 'فانکشنال', monthly_fee: 2400000 },
-  { id: 'cardio', label: 'هوازی / کاردیو', monthly_fee: 1800000 },
-  { id: 'boxing', label: 'بوکس', monthly_fee: 2600000 },
-  { id: 'mma', label: 'رزمی / MMA', monthly_fee: 2700000 },
+  { id: 'functional', label: 'فانکشنال فیتنس', monthly_fee: 2200000 },
+  { id: 'freestyle', label: 'فری استایل', monthly_fee: 2200000 },
+  { id: 'hyrox', label: 'هایروکس', monthly_fee: 2300000 },
+  { id: 'bodypump', label: 'بادی پامپ', monthly_fee: 2000000 },
+  { id: 'yoga', label: 'یوگا', monthly_fee: 1800000 },
+  { id: 'pilates', label: 'پیلاتس', monthly_fee: 1800000 },
+  { id: 'crossfit', label: 'کراسفیت', monthly_fee: 2400000 },
+  { id: 'aerofitness', label: 'ایروفیتنس', monthly_fee: 2000000 },
+  { id: 'zumba', label: 'زومبا', monthly_fee: 1700000 },
+  { id: 'persian_dance', label: 'رقص ایرانی', monthly_fee: 1700000 },
+  { id: 'crossfit_bb', label: 'کراسفیت + بدنسازی', monthly_fee: 2500000 },
+  { id: 'boxing_trx', label: 'بوکس + TRX', monthly_fee: 2300000 },
 ] as const;
 
 export type SportId = (typeof SPORTS)[number]['id'];
@@ -22,6 +25,45 @@ export function sportFee(id: string | null | undefined): number {
 export function sportLabel(id: string | null | undefined): string {
   const s = SPORTS.find((x) => x.id === id);
   return s ? s.label : id || '—';
+}
+
+/**
+ * با انتخاب رشته ورزشی، مناسب‌ترین مربی (بر اساس فیلد specialty) را برمی‌گرداند.
+ */
+export function matchCoachForSport(
+  sportId: string,
+  coaches: { id: number | string; full_name: string; specialty?: string | null }[],
+): { id: string; full_name: string } | null {
+  if (!sportId || !coaches?.length) return null;
+  const keywords: Record<string, string[]> = {
+    bodybuilding: ['بدنسازی'],
+    functional: ['فانکشنال'],
+    freestyle: ['فری استایل', 'فری‌استایل', 'فیری استایل'],
+    hyrox: ['هایروکس', 'هیروکس'],
+    bodypump: ['بادی پامپ', 'بادی‌پامپ', 'پامپ'],
+    yoga: ['یوگا'],
+    pilates: ['پیلاتس'],
+    crossfit: ['کراسفیت', 'کراس‌فیت', 'کراس فیت'],
+    aerofitness: ['ایروفیتنس', 'ایرو فیتنس', 'ایرو'],
+    zumba: ['زومبا'],
+    persian_dance: ['رقص ایرانی', 'رقص'],
+    crossfit_bb: ['کراسفیت + بدنسازی', 'کراسفیت', 'بدنسازی'],
+    boxing_trx: ['بوکس', 'trx', 'تی‌آر‌ایکس', 'تی ار ایکس'],
+  };
+  const keys = keywords[sportId] || [sportLabel(sportId)];
+  let best: { id: string; full_name: string; score: number } | null = null;
+  for (const c of coaches) {
+    const spec = (c.specialty || '').toLowerCase();
+    if (!spec) continue;
+    let score = 0;
+    for (const k of keys) {
+      if (spec.includes(k.toLowerCase())) score += k.length + 5;
+    }
+    if (score > 0 && (!best || score > best.score)) {
+      best = { id: String(c.id), full_name: c.full_name, score };
+    }
+  }
+  return best ? { id: best.id, full_name: best.full_name } : null;
 }
 
 export const REFERRAL_SOURCES = [
@@ -47,17 +89,15 @@ export const TRAINING_GOALS = [
   'کاهش استرس',
 ];
 
-export const HEIGHT_OPTIONS = Array.from({ length: 71 }, (_, i) => 140 + i); // 140–210
-export const WEIGHT_OPTIONS = Array.from({ length: 121 }, (_, i) => 40 + i); // 40–160
+export const HEIGHT_OPTIONS = Array.from({ length: 71 }, (_, i) => 140 + i);
+export const WEIGHT_OPTIONS = Array.from({ length: 121 }, (_, i) => 40 + i);
 
-/** سن از تاریخ تولد شمسی ذخیره‌شده */
 export function calcAgeFromBirthday(birthday: string): number | null {
   if (!birthday) return null;
   const parts = birthday.split(/[/-]/).map(Number);
   if (parts.length < 3 || parts[0] < 1200) return null;
   const [by, bm, bd] = parts;
   const now = new Date();
-  // تقریبی: سال شمسی فعلی ≈ میلادی - 621
   const jy = now.getFullYear() - 621;
   const jm = now.getMonth() + 1;
   const jd = now.getDate();
