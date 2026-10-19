@@ -197,4 +197,9 @@ app.get('/coaches/:id', (req, res) => {
     const members = db.prepare('SELECT * FROM members WHERE coach_id = ? ORDER BY id DESC').all(id);
     let totalFee = 0, totalCommission = 0;
     members.forEach((m) => {
-      const fee 
+      const fee = Number(m.monthly_fee) || 0;
+      const pct = Number(m.coach_commission_percent) || Number(coach.commission_percent) || 0;
+      totalFee += fee; totalCommission += (fee * pct) / 100;
+    });
+    res.json({ ...coach, members, stats: { member_count: members.length, total_monthly_fee: totalFee, total_commission: totalCommission } });
+  } catch 
