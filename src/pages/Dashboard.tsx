@@ -153,32 +153,32 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Welcome banner */}
+      {/* Welcome banner — soft sky */}
       <div
         className="relative overflow-hidden rounded-2xl p-5 sm:p-6"
         style={{
-          background: 'linear-gradient(135deg, #0f1419 0%, #1a222e 45%, #152028 100%)',
-          border: '1px solid rgba(232, 197, 71, 0.25)',
-          boxShadow: '0 12px 40px -12px rgba(15, 23, 42, 0.35)',
+          background: 'linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 40%, #ffffff 100%)',
+          border: '1px solid color-mix(in srgb, var(--accent) 28%, transparent)',
+          boxShadow: 'var(--shadow)',
         }}
       >
         <div
           className="pointer-events-none absolute inset-0"
           style={{
             background:
-              'radial-gradient(ellipse 70% 80% at 0% 50%, rgba(232, 197, 71, 0.15), transparent 55%)',
+              'radial-gradient(ellipse 70% 80% at 100% 0%, rgba(14, 165, 233, 0.12), transparent 55%)',
           }}
         />
         <div className="relative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <p className="text-xs font-medium flex items-center gap-1.5 mb-1" style={{ color: '#e8c547' }}>
+            <p className="text-xs font-medium flex items-center gap-1.5 mb-1" style={{ color: 'var(--accent)' }}>
               <Sparkles size={14} />
               خوش آمدید به Alpha GYM
             </p>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight" style={{ color: '#f8fafc' }}>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight" style={{ color: 'var(--text)' }}>
               سلام، {greetName}
             </h1>
-            <p className="text-sm mt-1.5 flex items-center gap-1.5" style={{ color: '#94a3b8' }}>
+            <p className="text-sm mt-1.5 flex items-center gap-1.5" style={{ color: 'var(--text-secondary)' }}>
               <Calendar size={14} />
               {persianDate}
             </p>
@@ -186,9 +186,9 @@ export default function Dashboard() {
           <div
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold self-start sm:self-auto"
             style={{
-              background: 'rgba(232, 197, 71, 0.15)',
-              color: '#f5d78e',
-              border: '1px solid rgba(232, 197, 71, 0.35)',
+              background: 'var(--accent-soft)',
+              color: 'var(--accent)',
+              border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
             }}
           >
             <Activity size={16} />
@@ -242,7 +242,7 @@ export default function Dashboard() {
                 توزیع فعال / غیرفعال / در حال انقضا
               </p>
             </div>
-            <TrendingUp size={18} style={{ color: 'var(--gold)' }} />
+            <TrendingUp size={18} style={{ color: 'var(--accent)' }} />
           </div>
           <StatusBarChart
             active={stats.activeMembers}
@@ -344,9 +344,9 @@ function MemberListCard({
                 <div
                   className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold shrink-0"
                   style={{
-                    background: 'var(--gold-soft)',
-                    color: 'var(--gold)',
-                    border: '1px solid color-mix(in srgb, var(--gold) 25%, transparent)',
+                    background: 'var(--accent-soft)',
+                    color: 'var(--accent)',
+                    border: '1px solid color-mix(in srgb, var(--accent) 25%, transparent)',
                   }}
                 >
                   {m.full_name?.charAt(0) || '?'}
@@ -462,7 +462,7 @@ function DonutChart({ value, loading }: { value: number; loading: boolean }) {
           cy={size / 2}
           r={r}
           fill="none"
-          stroke="var(--gold)"
+          stroke="var(--accent)"
           strokeWidth={stroke}
           strokeLinecap="round"
           strokeDasharray={c}
@@ -474,7 +474,7 @@ function DonutChart({ value, loading }: { value: number; loading: boolean }) {
         <p className="text-3xl font-extrabold" style={{ color: 'var(--text)' }}>
           {value}%
         </p>
-        <p className="text-[11px] font-medium" style={{ color: 'var(--gold)' }}>
+        <p className="text-[11px] font-medium" style={{ color: 'var(--accent)' }}>
           فعال
         </p>
       </div>
