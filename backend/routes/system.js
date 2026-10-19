@@ -120,8 +120,7 @@ function buildSqlDump(db) {
   const lines = [];
   lines.push('-- Alpha GYM full database dump');
   lines.push(`-- Generated: ${new Date().toISOString()}`);
-  lines.push('PRAGMA foreign_keys=OFF;');
-  lines.push('BEGIN TRANSACTION;');
+  // No BEGIN/COMMIT here — restore wraps its own transaction via better-sqlite3
 
   const objects = db
     .prepare(
@@ -158,9 +157,17 @@ function buildSqlDump(db) {
     }
   }
 
-  lines.push('COMMIT;');
-  lines.push('PRAGMA foreign_keys=ON;');
   return lines.join('\n');
+}
+
+/** Strip outer transaction / pragma lines so better-sqlite3.transaction() does not nest BEGIN. */
+function sanitizeRestoreSql(sql) {
+  return String(sql)
+    .replace(/^\s*PRAGMA\s+foreign_keys\s*=\s*(OFF|ON)\s*;?\s*$/gim, '')
+    .replace(/^\s*BEGIN(\s+TRANSACTION)?\s*;?\s*$/gim, '')
+    .replace(/^\s*COMMIT\s*;?\s*$/gim, '')
+    .replace(/^\s*END\s*;?\s*$/gim, '')
+    .replace(/^\s*ROLLBACK\s*;?\s*$/gim, '');
 }
 
 function collectPhotos(uploadsDir) {
@@ -386,17 +393,29 @@ function registerSystemRoutes(app, db, options = {}) {
         });
       }
 
-      const forbidden = /\b(ATTACH|DETACH|VACUUM INTO)\b/i;
+      const forbidden = /\b(ATTACH|DETACH|VACUUM\s+INTO)\b/i;
       if (forbidden.test(sql)) {
         return res.status(400).json({ error: 'دستورات غیرمجاز در فایل SQL' });
       }
 
+      const cleanSql = sanitizeRestoreSql(sql);
+      if (!cleanSql.trim()) {
+        return res.status(400).json({ error: 'پس از پاک‌سازی، SQL خالی شد' });
+      }
+
       const before = tableCounts(db);
 
-      const run = db.transaction(() => {
-        db.exec(sql);
-      });
-      run();
+      // better-sqlite3: never nest BEGIN TRANSACTION inside db.transaction()
+      const prevFk = db.pragma('foreign_keys', { simple: true });
+      db.pragma('foreign_keys = OFF');
+      try {
+        const run = db.transaction(() => {
+          db.exec(cleanSql);
+        });
+        run();
+      } finally {
+        db.pragma(`foreign_keys = ${prevFk ? 'ON' : 'OFF'}`);
+      }
 
       const photoResult = restorePhotos(uploadsDir, photos);
       const after = tableCounts(db);
@@ -443,4 +462,4 @@ function registerSystemRoutes(app, db, options = {}) {
   });
 }
 
-module.exports = { registerSystemRoutes, readLocalVersion };
+module.exports = { registerSystemRoutes, readLocalVersion, sanitizeRestoreSql };
