@@ -1,8 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   applyUpdate,
   checkUpdates,
+  downloadFullBackup,
+  downloadSqlBackup,
+  getBackupStats,
   getSystemVersion,
+  restoreBackup,
+  type BackupPayload,
+  type BackupStats,
   type SystemVersion,
   type UpdateCheck,
 } from '../services/systemService';
@@ -15,23 +21,32 @@ import {
   CheckCircle2,
   AlertTriangle,
   ExternalLink,
+  Database,
+  Upload,
+  HardDrive,
 } from 'lucide-react';
 
 export default function Settings() {
   const [version, setVersion] = useState<SystemVersion | null>(null);
   const [update, setUpdate] = useState<UpdateCheck | null>(null);
+  const [stats, setStats] = useState<BackupStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [log, setLog] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
-    const [v, u] = await Promise.all([getSystemVersion(), checkUpdates()]);
+    const [v, u, s] = await Promise.all([getSystemVersion(), checkUpdates(), getBackupStats()]);
     if (v.data) setVersion(v.data);
     if (u.data) setUpdate(u.data);
+    if (s.data) setStats(s.data);
     if (v.error) setError(v.error.message);
     if (u.error) setError(u.error.message);
     setLoading(false);
@@ -64,11 +79,67 @@ export default function Settings() {
     setApplying(false);
   };
 
+  const onBackupFull = async () => {
+    setBackingUp(true);
+    setError('');
+    setSuccess('');
+    const r = await downloadFullBackup();
+    if (r.error) setError(r.error.message);
+    else {
+      const tables = r.data?.tables || {};
+      const total = Object.values(tables).reduce((a, b) => a + (Number(b) || 0), 0);
+      setSuccess(
+        `پشتیبان کامل دانلود شد — ${total} رکورد در ${Object.keys(tables).length} جدول + ${r.data?.photo_count || 0} عکس + داده‌های مرورگر`,
+      );
+    }
+    setBackingUp(false);
+  };
+
+  const onBackupSql = () => {
+    downloadSqlBackup();
+    setSuccess('فایل SQL در حال دانلود است');
+  };
+
+  const onRestoreFile = async (file: File) => {
+    if (!confirm('با بازگردانی، داده‌های فعلی سرور جایگزین می‌شود. ادامه می‌دهید؟')) return;
+    setRestoring(true);
+    setError('');
+    setSuccess('');
+    try {
+      const text = await file.text();
+      let payload: BackupPayload | { sql: string; photos?: Record<string, string>; local?: Record<string, string> };
+
+      if (file.name.endsWith('.sql') || text.trim().startsWith('--') || text.includes('BEGIN TRANSACTION')) {
+        payload = { sql: text };
+      } else {
+        payload = JSON.parse(text) as BackupPayload;
+        if (!payload.sql) throw new Error('فایل JSON باید فیلد sql داشته باشد');
+      }
+
+      const r = await restoreBackup(payload);
+      if (r.error) setError(r.error.message);
+      else {
+        const after = r.data?.tables_after || {};
+        const lines = Object.entries(after).map(([k, v]) => `${k}: ${v}`);
+        setSuccess(
+          `${r.data?.message || 'بازگردانی شد'} — عکس‌ها: ${r.data?.photos_restored ?? 0}\n${lines.join(' · ')}`,
+        );
+        await load();
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'خواندن فایل ناموفق بود');
+    }
+    setRestoring(false);
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
+  const tableEntries = stats?.tables ? Object.entries(stats.tables) : [];
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="page-title">تنظیمات پنل</h1>
-        <p className="page-subtitle">نسخه سیستم، به‌روزرسانی از GitHub و وضعیت سرور</p>
+        <p className="page-subtitle">نسخه سیستم، پشتیبان‌گیری کامل و به‌روزرسانی</p>
       </div>
 
       {error && (
@@ -76,6 +147,88 @@ export default function Settings() {
           {error}
         </div>
       )}
+      {success && (
+        <div className="p-3 rounded-xl text-sm whitespace-pre-wrap" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
+          {success}
+        </div>
+      )}
+
+      {/* ── Backup / Restore ── */}
+      <div className="panel-card p-5 space-y-4">
+        <h3 className="section-title flex items-center gap-2">
+          <HardDrive size={16} style={{ color: 'var(--accent)' }} />
+          پشتیبان‌گیری و بازگردانی سیستم
+        </h3>
+        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+          خروجی کامل شامل همه جداول SQLite (اعضا، مربیان، حضور، پیامک، فیش، پرداخت، هزینه)، عکس‌های آپلود‌شده و داده‌های محلی مرورگر است.
+        </p>
+
+        {loading ? (
+          <div className="h-12 skeleton" />
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {tableEntries.map(([name, count]) => (
+              <div key={name} className="p-3 rounded-xl" style={{ background: 'var(--bg-muted)' }}>
+                <p className="text-[10px] font-medium truncate" style={{ color: 'var(--text-muted)' }} dir="ltr">
+                  {name}
+                </p>
+                <p className="text-lg font-bold" style={{ color: 'var(--text)' }}>
+                  {count}
+                </p>
+              </div>
+            ))}
+            <div className="p-3 rounded-xl" style={{ background: 'var(--bg-muted)' }}>
+              <p className="text-[10px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                عکس‌ها
+              </p>
+              <p className="text-lg font-bold" style={{ color: 'var(--text)' }}>
+                {stats?.photo_count ?? 0}
+              </p>
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn-primary" onClick={onBackupFull} disabled={backingUp}>
+            <Database size={16} />
+            {backingUp ? 'در حال ساخت…' : 'دانلود پشتیبان کامل (JSON)'}
+          </button>
+          <button type="button" className="btn-outline" onClick={onBackupSql}>
+            <Download size={16} />
+            فقط SQL
+          </button>
+          <button
+            type="button"
+            className="btn-outline"
+            onClick={() => fileRef.current?.click()}
+            disabled={restoring}
+          >
+            <Upload size={16} />
+            {restoring ? 'در حال بازگردانی…' : 'بازگردانی از فایل'}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".json,.sql,application/json,text/plain"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) onRestoreFile(f);
+            }}
+          />
+        </div>
+
+        <div className="p-3 rounded-xl text-xs space-y-1" style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}>
+          <p className="font-medium flex items-center gap-1" style={{ color: 'var(--text)' }}>
+            <Shield size={12} /> نکات امنیتی
+          </p>
+          <ul className="list-disc pr-4 space-y-0.5">
+            <li>فایل JSON کامل را در جای امن نگه دارید (شامل عکس‌ها به صورت base64).</li>
+            <li>بازگردانی داده‌های فعلی سرور را جایگزین می‌کند — قبلش یک پشتیبان تازه بگیرید.</li>
+            <li>می‌توانید فقط فایل .sql را هم بازگردانی کنید (بدون عکس).</li>
+          </ul>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="panel-card p-5 space-y-3">
@@ -149,30 +302,6 @@ export default function Settings() {
           <Download size={16} style={{ color: 'var(--accent)' }} />
           نصب به‌روزرسانی از GitHub
         </h3>
-
-        <div className="p-4 rounded-xl text-sm space-y-2" style={{ background: 'var(--bg-muted)' }}>
-          <p className="flex items-center gap-2 font-medium" style={{ color: 'var(--text)' }}>
-            <Shield size={14} />
-            آیا شدنی است؟
-          </p>
-          <ul className="text-xs space-y-1 list-disc pr-4" style={{ color: 'var(--text-secondary)' }}>
-            <li>بررسی نسخه از GitHub: همیشه ممکن است (API عمومی یا با توکن برای ریپوی خصوصی).</li>
-            <li>
-              نصب خودکار روی سرور فقط وقتی فعال است که{' '}
-              <code dir="ltr">ENABLE_SELF_UPDATE=true</code> باشد و پروژه با git/docker روی همان سرور در دسترس باشد.
-            </li>
-            <li>
-              داخل کانتینر بدون مانت سورس و دسترسی docker، نصب کامل ممکن نیست — در آن حالت از CI/CD یا SSH استفاده کنید.
-            </li>
-            <li>
-              دستور پیش‌فرض:{' '}
-              <code dir="ltr" className="text-[10px]">
-                git pull && docker compose up -d --build
-              </code>
-            </li>
-          </ul>
-        </div>
-
         <div className="flex flex-wrap gap-2">
           <button type="button" className="btn-outline" onClick={onCheck} disabled={checking}>
             <RefreshCcw size={16} />
@@ -183,21 +312,16 @@ export default function Settings() {
             className="btn-primary"
             onClick={onApply}
             disabled={applying || version?.self_update_enabled === false}
-            title={version?.self_update_enabled ? '' : 'ENABLE_SELF_UPDATE روی سرور خاموش است'}
           >
             <Download size={16} />
             {applying ? 'در حال نصب...' : 'نصب نسخه جدید روی سرور'}
           </button>
         </div>
-
         {version && !version.self_update_enabled && (
           <p className="text-xs" style={{ color: 'var(--warning)' }}>
-            به‌روزرسانی خودکار الان غیرفعال است. برای فعال‌سازی در env سرور:{' '}
-            <span dir="ltr">ENABLE_SELF_UPDATE=true</span> و در صورت نیاز{' '}
-            <span dir="ltr">UPDATE_PROJECT_DIR</span> / <span dir="ltr">GITHUB_TOKEN</span>
+            به‌روزرسانی خودکار غیرفعال است. ENABLE_SELF_UPDATE=true روی سرور
           </p>
         )}
-
         {log && (
           <pre
             className="text-[11px] p-3 rounded-xl overflow-auto max-h-48"
@@ -214,7 +338,7 @@ export default function Settings() {
           سایر
         </h3>
         <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-          تم روشن/تاریک از آیکون خورشید/ماه بالای صفحه قابل تغییر است. اعلان نسخه جدید با زنگوله کنار همان دکمه نمایش داده می‌شود.
+          تم روشن/تاریک از آیکون خورشید/ماه بالای صفحه قابل تغییر است.
         </p>
       </div>
     </div>
