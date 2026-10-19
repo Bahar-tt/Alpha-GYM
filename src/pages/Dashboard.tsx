@@ -13,6 +13,7 @@ import {
   Calendar,
   Activity,
   ArrowUpRight,
+  Sparkles,
 } from 'lucide-react';
 
 interface Stats {
@@ -41,7 +42,7 @@ function weekEndIso(): string {
 }
 
 export default function Dashboard() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, profile } = useAuth();
   const [stats, setStats] = useState<Stats>({
     totalMembers: 0,
     activeMembers: 0,
@@ -121,39 +122,16 @@ export default function Dashboard() {
     day: 'numeric',
   });
 
+  const greetName = profile?.full_name?.trim() || 'مدیر';
+
   const statCards = [
-    {
-      label: 'کل اعضا',
-      value: stats.totalMembers,
-      icon: Users,
-      tone: 'accent' as const,
-    },
-    {
-      label: 'اعضای فعال',
-      value: stats.activeMembers,
-      icon: UserCheck,
-      tone: 'success' as const,
-    },
-    {
-      label: 'غیرفعال',
-      value: stats.inactiveMembers,
-      icon: UserX,
-      tone: 'danger' as const,
-    },
-    {
-      label: 'انقضا این هفته',
-      value: stats.expiringThisWeek,
-      icon: AlertTriangle,
-      tone: 'warning' as const,
-    },
+    { label: 'کل اعضا', value: stats.totalMembers, icon: Users, tone: 'accent' as const },
+    { label: 'اعضای فعال', value: stats.activeMembers, icon: UserCheck, tone: 'success' as const },
+    { label: 'غیرفعال', value: stats.inactiveMembers, icon: UserX, tone: 'danger' as const },
+    { label: 'انقضا این هفته', value: stats.expiringThisWeek, icon: AlertTriangle, tone: 'warning' as const },
     ...(isAdmin
       ? [
-          {
-            label: 'تمدید این ماه',
-            value: stats.totalRenewals,
-            icon: RefreshCcw,
-            tone: 'accent' as const,
-          },
+          { label: 'تمدید این ماه', value: stats.totalRenewals, icon: RefreshCcw, tone: 'accent' as const },
           {
             label: 'درآمد ماهانه',
             value: stats.monthlyRevenue.toLocaleString('fa-IR'),
@@ -175,21 +153,47 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-        <div>
-          <h1 className="page-title">داشبورد</h1>
-          <p className="page-subtitle flex items-center gap-1.5">
-            <Calendar size={14} />
-            {persianDate}
-          </p>
-        </div>
+      {/* Welcome banner */}
+      <div
+        className="relative overflow-hidden rounded-2xl p-5 sm:p-6"
+        style={{
+          background: 'linear-gradient(135deg, #0f1419 0%, #1a222e 45%, #152028 100%)',
+          border: '1px solid rgba(232, 197, 71, 0.25)',
+          boxShadow: '0 12px 40px -12px rgba(15, 23, 42, 0.35)',
+        }}
+      >
         <div
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium"
-          style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}
-        >
-          <Activity size={14} style={{ color: 'var(--accent)' }} />
-          نرخ فعال بودن: {activeRate}%
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              'radial-gradient(ellipse 70% 80% at 0% 50%, rgba(232, 197, 71, 0.15), transparent 55%)',
+          }}
+        />
+        <div className="relative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <p className="text-xs font-medium flex items-center gap-1.5 mb-1" style={{ color: '#e8c547' }}>
+              <Sparkles size={14} />
+              خوش آمدید به Alpha GYM
+            </p>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight" style={{ color: '#f8fafc' }}>
+              سلام، {greetName}
+            </h1>
+            <p className="text-sm mt-1.5 flex items-center gap-1.5" style={{ color: '#94a3b8' }}>
+              <Calendar size={14} />
+              {persianDate}
+            </p>
+          </div>
+          <div
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold self-start sm:self-auto"
+            style={{
+              background: 'rgba(232, 197, 71, 0.15)',
+              color: '#f5d78e',
+              border: '1px solid rgba(232, 197, 71, 0.35)',
+            }}
+          >
+            <Activity size={16} />
+            نرخ فعال بودن: {activeRate}%
+          </div>
         </div>
       </div>
 
@@ -206,7 +210,11 @@ export default function Dashboard() {
               <div className="flex items-start justify-between mb-3">
                 <div
                   className="w-10 h-10 rounded-xl flex items-center justify-center"
-                  style={{ background: tone.bg, color: tone.color }}
+                  style={{
+                    background: tone.bg,
+                    color: tone.color,
+                    border: `1px solid color-mix(in srgb, ${tone.color} 25%, transparent)`,
+                  }}
                 >
                   <card.icon size={18} strokeWidth={2} />
                 </div>
@@ -215,7 +223,7 @@ export default function Dashboard() {
               <p className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text)' }}>
                 {card.value}
               </p>
-              <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
+              <p className="text-xs mt-1 font-medium" style={{ color: 'var(--text-secondary)' }}>
                 {card.label}
                 {'suffix' in card && card.suffix ? ` · ${card.suffix}` : ''}
               </p>
@@ -224,7 +232,7 @@ export default function Dashboard() {
         })}
       </div>
 
-      {/* Charts row */}
+      {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 sm:gap-6">
         <div className="panel-card p-5 lg:col-span-3">
           <div className="flex items-center justify-between mb-5">
@@ -234,7 +242,7 @@ export default function Dashboard() {
                 توزیع فعال / غیرفعال / در حال انقضا
               </p>
             </div>
-            <TrendingUp size={18} style={{ color: 'var(--accent)' }} />
+            <TrendingUp size={18} style={{ color: 'var(--gold)' }} />
           </div>
           <StatusBarChart
             active={stats.activeMembers}
@@ -257,7 +265,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Lists */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         <MemberListCard
           title="اعضای اخیر"
@@ -277,7 +284,6 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Membership distribution */}
       <div className="panel-card p-5">
         <div className="flex items-center justify-between mb-5">
           <div>
@@ -337,7 +343,11 @@ function MemberListCard({
               <div className="flex items-center gap-3 min-w-0">
                 <div
                   className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold shrink-0"
-                  style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
+                  style={{
+                    background: 'var(--gold-soft)',
+                    color: 'var(--gold)',
+                    border: '1px solid color-mix(in srgb, var(--gold) 25%, transparent)',
+                  }}
                 >
                   {m.full_name?.charAt(0) || '?'}
                 </div>
@@ -400,10 +410,13 @@ function StatusBarChart({
     <div className="space-y-4">
       {rows.map((r) => (
         <div key={r.label} className="flex items-center gap-3">
-          <span className="text-xs w-20 shrink-0" style={{ color: 'var(--text-secondary)' }}>
+          <span className="text-xs w-20 shrink-0 font-medium" style={{ color: 'var(--text-secondary)' }}>
             {r.label}
           </span>
-          <div className="flex-1 h-8 rounded-full overflow-hidden" style={{ background: 'var(--bg-muted)' }}>
+          <div
+            className="flex-1 h-8 rounded-full overflow-hidden"
+            style={{ background: 'var(--bg-muted)', border: '1px solid var(--border)' }}
+          >
             <div
               className="h-full rounded-full transition-all duration-700 ease-out flex items-center justify-end px-3"
               style={{
@@ -449,7 +462,7 @@ function DonutChart({ value, loading }: { value: number; loading: boolean }) {
           cy={size / 2}
           r={r}
           fill="none"
-          stroke="var(--accent)"
+          stroke="var(--gold)"
           strokeWidth={stroke}
           strokeLinecap="round"
           strokeDasharray={c}
@@ -461,7 +474,7 @@ function DonutChart({ value, loading }: { value: number; loading: boolean }) {
         <p className="text-3xl font-extrabold" style={{ color: 'var(--text)' }}>
           {value}%
         </p>
-        <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+        <p className="text-[11px] font-medium" style={{ color: 'var(--gold)' }}>
           فعال
         </p>
       </div>
@@ -511,10 +524,13 @@ function MembershipBars({ members, loading }: { members: MemberRecord[]; loading
     <div className="space-y-3">
       {data.map((d, i) => (
         <div key={d.type} className="flex items-center gap-3">
-          <span className="text-xs w-16 shrink-0" style={{ color: 'var(--text-secondary)' }}>
+          <span className="text-xs w-16 shrink-0 font-medium" style={{ color: 'var(--text-secondary)' }}>
             {labels[d.type] || d.type}
           </span>
-          <div className="flex-1 h-7 rounded-full overflow-hidden" style={{ background: 'var(--bg-muted)' }}>
+          <div
+            className="flex-1 h-7 rounded-full overflow-hidden"
+            style={{ background: 'var(--bg-muted)', border: '1px solid var(--border)' }}
+          >
             <div
               className="h-full rounded-full transition-all duration-700"
               style={{
