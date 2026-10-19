@@ -56,7 +56,6 @@ async function fetchGithubLatest() {
   };
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  // 1) try latest release
   let release = null;
   try {
     const r = await fetch(`https://api.github.com/repos/${owner}/${repo}/releases/latest`, { headers });
@@ -65,7 +64,6 @@ async function fetchGithubLatest() {
     /* no releases */
   }
 
-  // 2) latest commit on branch
   let commit = null;
   try {
     const r = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits/${branch}`, { headers });
@@ -74,7 +72,6 @@ async function fetchGithubLatest() {
     /* */
   }
 
-  // 3) VERSION file from repo
   let remoteVersion = null;
   try {
     const r = await fetch(
@@ -106,7 +103,137 @@ async function fetchGithubLatest() {
   };
 }
 
-function registerSystemRoutes(app) {
+function sqlLiteral(val) {
+  if (val === null || val === undefined) return 'NULL';
+  if (typeof val === 'number') {
+    if (!Number.isFinite(val)) return 'NULL';
+    return String(val);
+  }
+  if (typeof val === 'boolean') return val ? '1' : '0';
+  if (typeof val === 'bigint') return String(val);
+  if (Buffer.isBuffer(val)) return `X'${val.toString('hex')}'`;
+  const s = String(val).replace(/'/g, "''");
+  return `'${s}'`;
+}
+
+function buildSqlDump(db) {
+  const lines = [];
+  lines.push('-- Alpha GYM full database dump');
+  lines.push(`-- Generated: ${new Date().toISOString()}`);
+  lines.push('PRAGMA foreign_keys=OFF;');
+  lines.push('BEGIN TRANSACTION;');
+
+  const objects = db
+    .prepare(
+      "SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND sql IS NOT NULL ORDER BY CASE type WHEN 'table' THEN 1 WHEN 'index' THEN 2 WHEN 'trigger' THEN 3 ELSE 4 END, name",
+    )
+    .all();
+
+  const tables = objects.filter((o) => o.type === 'table').map((o) => o.name);
+
+  for (const name of [...tables].reverse()) {
+    lines.push(`DROP TABLE IF EXISTS "${name}";`);
+  }
+
+  for (const obj of objects) {
+    if (obj.type === 'table' && obj.sql) {
+      lines.push(`${obj.sql};`);
+    }
+  }
+
+  for (const table of tables) {
+    const cols = db.prepare(`PRAGMA table_info("${table}")`).all();
+    if (!cols.length) continue;
+    const colNames = cols.map((c) => `"${c.name}"`).join(', ');
+    const rows = db.prepare(`SELECT * FROM "${table}"`).all();
+    for (const row of rows) {
+      const values = cols.map((c) => sqlLiteral(row[c.name])).join(', ');
+      lines.push(`INSERT INTO "${table}" (${colNames}) VALUES (${values});`);
+    }
+  }
+
+  for (const obj of objects) {
+    if ((obj.type === 'index' || obj.type === 'trigger') && obj.sql) {
+      lines.push(`${obj.sql};`);
+    }
+  }
+
+  lines.push('COMMIT;');
+  lines.push('PRAGMA foreign_keys=ON;');
+  return lines.join('\n');
+}
+
+function collectPhotos(uploadsDir) {
+  const photos = {};
+  if (!uploadsDir || !fs.existsSync(uploadsDir)) return photos;
+  let entries = [];
+  try {
+    entries = fs.readdirSync(uploadsDir);
+  } catch {
+    return photos;
+  }
+  for (const name of entries) {
+    if (name.startsWith('.')) continue;
+    const full = path.join(uploadsDir, name);
+    try {
+      const st = fs.statSync(full);
+      if (!st.isFile()) continue;
+      if (st.size > 8 * 1024 * 1024) {
+        console.warn(`[BACKUP] skip large photo ${name} (${st.size} bytes)`);
+        continue;
+      }
+      photos[name] = fs.readFileSync(full).toString('base64');
+    } catch (e) {
+      console.warn('[BACKUP] photo read failed', name, e.message);
+    }
+  }
+  return photos;
+}
+
+function tableCounts(db) {
+  const tables = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+    .all()
+    .map((r) => r.name);
+  const counts = {};
+  for (const t of tables) {
+    try {
+      counts[t] = db.prepare(`SELECT COUNT(*) AS c FROM "${t}"`).get().c;
+    } catch {
+      counts[t] = -1;
+    }
+  }
+  return counts;
+}
+
+function restorePhotos(uploadsDir, photos) {
+  if (!photos || typeof photos !== 'object') return { restored: 0, errors: [] };
+  if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+  let restored = 0;
+  const errors = [];
+  for (const [name, b64] of Object.entries(photos)) {
+    const safe = path.basename(String(name)).replace(/[^a-zA-Z0-9._-]/g, '_');
+    if (!safe || safe === '.' || safe === '..') continue;
+    try {
+      const buf = Buffer.from(String(b64), 'base64');
+      fs.writeFileSync(path.join(uploadsDir, safe), buf);
+      restored += 1;
+    } catch (e) {
+      errors.push(`${safe}: ${e.message}`);
+    }
+  }
+  return { restored, errors };
+}
+
+function registerSystemRoutes(app, db, options = {}) {
+  const uploadsDir =
+    options.uploadsDir ||
+    path.join(
+      process.env.DATA_DIR ||
+        (process.env.DB_PATH ? path.dirname(process.env.DB_PATH) : '/app/data'),
+      'uploads',
+    );
+
   app.get('/system/version', (_req, res) => {
     const version = readLocalVersion();
     res.json({
@@ -124,8 +251,6 @@ function registerSystemRoutes(app) {
       const remote = await fetchGithubLatest();
       const hasUpdate =
         remote.remote_version != null ? isNewer(remote.remote_version, local) : false;
-
-      // اگر VERSION یکسان بود ولی commit جدیدتر باشد، فقط اطلاع بده
       const commitHint = !hasUpdate && remote.commit_sha ? true : false;
 
       res.json({
@@ -163,7 +288,6 @@ function registerSystemRoutes(app) {
       'git pull origin master && (docker compose up -d --build || docker-compose up -d --build || npm run build)';
 
     try {
-      // بررسی اولیه
       const check = await fetchGithubLatest();
       const local = readLocalVersion();
 
@@ -193,6 +317,128 @@ function registerSystemRoutes(app) {
         stdout: err.stdout ? String(err.stdout).slice(-2000) : undefined,
         stderr: err.stderr ? String(err.stderr).slice(-2000) : undefined,
       });
+    }
+  });
+
+  app.get('/system/backup', (req, res) => {
+    try {
+      const sql = buildSqlDump(db);
+      const photos = collectPhotos(uploadsDir);
+      const counts = tableCounts(db);
+      const payload = {
+        format: 'alpha-gym-backup',
+        format_version: 1,
+        exported_at: new Date().toISOString(),
+        app_version: readLocalVersion(),
+        tables: counts,
+        photo_count: Object.keys(photos).length,
+        sql,
+        photos,
+      };
+
+      if (String(req.query.download || '') === '1') {
+        const fname = `alpha-gym-backup-${new Date().toISOString().slice(0, 10)}.json`;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
+        return res.send(JSON.stringify(payload));
+      }
+
+      res.json(payload);
+    } catch (err) {
+      console.error('system/backup', err);
+      res.status(500).json({
+        error: 'ساخت پشتیبان ناموفق بود',
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/system/backup.sql', (_req, res) => {
+    try {
+      const sql = buildSqlDump(db);
+      const fname = `alpha-gym-${new Date().toISOString().slice(0, 10)}.sql`;
+      res.setHeader('Content-Type', 'application/sql; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
+      res.send(sql);
+    } catch (err) {
+      console.error('system/backup.sql', err);
+      res.status(500).json({ error: 'خروجی SQL ناموفق بود' });
+    }
+  });
+
+  app.post('/system/restore', (req, res) => {
+    try {
+      const body = req.body || {};
+      let sql = null;
+      let photos = null;
+
+      if (typeof body.sql === 'string' && body.sql.trim()) {
+        sql = body.sql;
+        photos = body.photos && typeof body.photos === 'object' ? body.photos : null;
+      } else if (body.format === 'alpha-gym-backup' && body.sql) {
+        sql = body.sql;
+        photos = body.photos || null;
+      }
+
+      if (!sql || !String(sql).trim()) {
+        return res.status(400).json({
+          error: 'فایل پشتیبان نامعتبر است. باید فیلد sql یا فایل .sql داشته باشد.',
+        });
+      }
+
+      const forbidden = /\b(ATTACH|DETACH|VACUUM INTO)\b/i;
+      if (forbidden.test(sql)) {
+        return res.status(400).json({ error: 'دستورات غیرمجاز در فایل SQL' });
+      }
+
+      const before = tableCounts(db);
+
+      const run = db.transaction(() => {
+        db.exec(sql);
+      });
+      run();
+
+      const photoResult = restorePhotos(uploadsDir, photos);
+      const after = tableCounts(db);
+
+      console.log('[RESTORE] done', { before, after, photos: photoResult.restored });
+
+      res.json({
+        ok: true,
+        message: 'پشتیبان با موفقیت بازگردانی شد',
+        tables_before: before,
+        tables_after: after,
+        photos_restored: photoResult.restored,
+        photo_errors: photoResult.errors,
+      });
+    } catch (err) {
+      console.error('system/restore', err);
+      res.status(500).json({
+        error: 'بازگردانی ناموفق بود',
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/system/backup/stats', (_req, res) => {
+    try {
+      const counts = tableCounts(db);
+      let photoCount = 0;
+      if (fs.existsSync(uploadsDir)) {
+        try {
+          photoCount = fs.readdirSync(uploadsDir).filter((n) => !n.startsWith('.')).length;
+        } catch {
+          photoCount = 0;
+        }
+      }
+      res.json({
+        tables: counts,
+        photo_count: photoCount,
+        uploads_dir: uploadsDir,
+        app_version: readLocalVersion(),
+      });
+    } catch (err) {
+      res.status(500).json({ error: 'خواندن آمار ناموفق بود' });
     }
   });
 }
