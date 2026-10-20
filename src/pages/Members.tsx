@@ -413,7 +413,27 @@ export default function Members() {
               <Field label="کد پرسنلی" required><input className="input-field" value={form.personnel_code} onChange={(e) => setForm({ ...form, personnel_code: e.target.value })} required dir="ltr" /></Field>
 
               <SectionTitle>اطلاعات ورزشی</SectionTitle>
-              <Field label="مربی">
+              <Field label="رشته ورزشی" required>
+                <select
+                  className="input-field"
+                  value={form.sport}
+                  onChange={(e) => {
+                    const sport = e.target.value;
+                    const matched = matchCoachForSport(sport, coaches);
+                    setForm({
+                      ...form,
+                      sport,
+                      coach_id: matched ? matched.id : '',
+                      coach_name: matched ? matched.full_name : '',
+                    });
+                  }}
+                  required
+                >
+                  <option value="">انتخاب رشته</option>
+                  {SPORTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                </select>
+              </Field>
+              <Field label="نام مربی">
                 <CoachPicker
                   coaches={coaches}
                   valueId={form.coach_id}
@@ -423,26 +443,13 @@ export default function Members() {
                       setForm({ ...form, coach_id: '', coach_name: '' });
                       return;
                     }
-                    const sport = matchSportForCoach(c.specialty) || form.sport;
                     setForm({
                       ...form,
                       coach_id: String(c.id),
                       coach_name: c.full_name,
-                      sport,
                     });
                   }}
                 />
-              </Field>
-              <Field label="رشته ورزشی" required>
-                <select
-                  className="input-field"
-                  value={form.sport}
-                  onChange={(e) => setForm({ ...form, sport: e.target.value })}
-                  required
-                >
-                  <option value="">انتخاب رشته</option>
-                  {SPORTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-                </select>
               </Field>
               <Field label="نوع عضویت">
                 <select className="input-field" value={form.membership_type} onChange={(e) => setForm({ ...form, membership_type: e.target.value as MembershipType })}>
