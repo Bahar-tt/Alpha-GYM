@@ -2,6 +2,12 @@ import { apiDelete, apiGet, apiPost, apiPut, type ApiMember } from './api';
 
 export type MembershipType = 'monthly' | 'quarterly' | 'yearly' | 'vip';
 
+export interface MemberSportEntry {
+  sport: string;
+  coach_id?: number | null;
+  coach_name?: string;
+}
+
 export interface MemberFormPayload {
   full_name: string;
   phone: string;
@@ -27,6 +33,7 @@ export interface MemberFormPayload {
   national_id?: string;
   father_name?: string;
   sport?: string;
+  sports?: MemberSportEntry[];
   height_cm?: number;
   weight_kg?: number;
 }
@@ -36,15 +43,43 @@ export interface MemberRecord extends MemberFormPayload {
   is_active?: boolean;
   created_at?: string;
   attendance_count?: number;
+  sports_json?: string | null;
 }
 
 function todayIso(): string {
   return new Date().toISOString().split('T')[0];
 }
 
+export function parseMemberSports(row: { sports_json?: string | null; sport?: string | null; coach_id?: number | null; coach_name?: string | null }): MemberSportEntry[] {
+  if (row.sports_json) {
+    try {
+      const arr = JSON.parse(row.sports_json);
+      if (Array.isArray(arr) && arr.length) {
+        return arr
+          .filter((x: MemberSportEntry) => x && x.sport)
+          .map((x: MemberSportEntry) => ({
+            sport: String(x.sport),
+            coach_id: x.coach_id != null ? Number(x.coach_id) : null,
+            coach_name: x.coach_name ? String(x.coach_name) : '',
+          }));
+      }
+    } catch { /* fall through */ }
+  }
+  if (row.sport) {
+    return [{
+      sport: String(row.sport),
+      coach_id: row.coach_id != null ? Number(row.coach_id) : null,
+      coach_name: row.coach_name ? String(row.coach_name) : '',
+    }];
+  }
+  return [];
+}
+
 function apiToRecord(row: ApiMember): MemberRecord {
   const active = row.expiry_date >= todayIso();
   const mType = (row.membership_type as MembershipType) || 'monthly';
+  const sports = parseMemberSports(row);
+  const primary = sports[0];
   return {
     id: String(row.id),
     full_name: row.name,
@@ -58,8 +93,8 @@ function apiToRecord(row: ApiMember): MemberRecord {
     birthday: row.birthday ? String(row.birthday) : '',
     notes: '',
     personnel_code: row.personnel_code ? String(row.personnel_code) : '',
-    coach_name: row.coach_name ? String(row.coach_name) : '',
-    coach_id: row.coach_id != null ? Number(row.coach_id) : null,
+    coach_name: primary?.coach_name || (row.coach_name ? String(row.coach_name) : ''),
+    coach_id: primary?.coach_id ?? (row.coach_id != null ? Number(row.coach_id) : null),
     monthly_fee: Number(row.monthly_fee) || 0,
     coach_commission_percent: Number(row.coach_commission_percent) || 0,
     has_insurance: !!(row.has_insurance === 1 || row.has_insurance === true),
@@ -70,7 +105,9 @@ function apiToRecord(row: ApiMember): MemberRecord {
     photo_url: row.photo_url ? String(row.photo_url) : '',
     national_id: row.national_id ? String(row.national_id) : '',
     father_name: row.father_name ? String(row.father_name) : '',
-    sport: row.sport ? String(row.sport) : '',
+    sport: primary?.sport || (row.sport ? String(row.sport) : ''),
+    sports,
+    sports_json: row.sports_json ?? null,
     height_cm: row.height_cm != null ? Number(row.height_cm) : 0,
     weight_kg: row.weight_kg != null ? Number(row.weight_kg) : 0,
     attendance_count: row.attendance_count ?? 0,
@@ -79,6 +116,8 @@ function apiToRecord(row: ApiMember): MemberRecord {
 }
 
 function payloadToApi(payload: MemberFormPayload) {
+  const sports = (payload.sports || []).filter((s) => s.sport);
+  const primary = sports[0];
   return {
     name: payload.full_name.trim(),
     phone: payload.phone.trim(),
@@ -86,8 +125,8 @@ function payloadToApi(payload: MemberFormPayload) {
     weekly_sessions: payload.weekly_sessions,
     birthday: payload.birthday?.trim() || null,
     personnel_code: payload.personnel_code?.trim() || null,
-    coach_name: payload.coach_name?.trim() || null,
-    coach_id: payload.coach_id ?? null,
+    coach_name: primary?.coach_name?.trim() || payload.coach_name?.trim() || null,
+    coach_id: primary?.coach_id ?? payload.coach_id ?? null,
     membership_type: payload.membership_type,
     start_date: payload.start_date,
     monthly_fee: payload.monthly_fee ?? 0,
@@ -100,7 +139,12 @@ function payloadToApi(payload: MemberFormPayload) {
     photo_url: payload.photo_url?.trim() || null,
     national_id: payload.national_id?.trim() || null,
     father_name: payload.father_name?.trim() || null,
-    sport: payload.sport?.trim() || null,
+    sport: primary?.sport || payload.sport?.trim() || null,
+    sports: sports.map((s) => ({
+      sport: s.sport,
+      coach_id: s.coach_id ?? null,
+      coach_name: s.coach_name || null,
+    })),
     height_cm: payload.height_cm || null,
     weight_kg: payload.weight_kg || null,
   };
@@ -168,6 +212,7 @@ export async function updateMemberExpiry(
     national_id: existing.national_id,
     father_name: existing.father_name,
     sport: existing.sport,
+    sports_json: existing.sports_json,
     height_cm: existing.height_cm,
     weight_kg: existing.weight_kg,
     _renewal: opts
