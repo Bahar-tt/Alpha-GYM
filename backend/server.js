@@ -47,7 +47,7 @@ const addCol = (n, d) => { if (!memberCols.includes(n)) { db.exec(`ALTER TABLE m
  'monthly_fee REAL DEFAULT 0','coach_commission_percent REAL DEFAULT 0',
  'has_insurance INTEGER DEFAULT 0','insurance_notes TEXT','referrer_name TEXT',
  'referral_source TEXT','training_goal TEXT','photo_url TEXT','national_id TEXT',
- 'father_name TEXT','sport TEXT','height_cm REAL','weight_kg REAL'].forEach(s => {
+ 'father_name TEXT','sport TEXT','height_cm REAL','weight_kg REAL','sports_json TEXT'].forEach(s => {
   const [n, ...rest] = s.split(' '); addCol(n, rest.join(' '));
 });
 
