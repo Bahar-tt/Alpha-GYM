@@ -33,6 +33,7 @@ export interface ApiMember {
   national_id?: string | null;
   father_name?: string | null;
   sport?: string | null;
+  sports_json?: string | null;
   height_cm?: number | null;
   weight_kg?: number | null;
   recent_attendances?: unknown[];
