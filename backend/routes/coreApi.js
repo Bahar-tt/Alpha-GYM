@@ -12,6 +12,30 @@ module.exports = function registerCoreApi(app, db, h) {
     return { coach_id: cid, coach_name: cname || null };
   }
 
+  function normalizeSports(b) {
+    let entries = [];
+    if (Array.isArray(b.sports) && b.sports.length) {
+      for (const s of b.sports) {
+        const sport = s && s.sport ? String(s.sport).trim() : '';
+        if (!sport) continue;
+        const cf = resolveCoachFields(s.coach_id, s.coach_name);
+        entries.push({ sport, coach_id: cf.coach_id, coach_name: cf.coach_name });
+      }
+    }
+    if (!entries.length && b.sport) {
+      const cf = resolveCoachFields(b.coach_id, b.coach_name);
+      entries.push({ sport: String(b.sport).trim(), coach_id: cf.coach_id, coach_name: cf.coach_name });
+    }
+    const primary = entries[0] || { sport: null, coach_id: null, coach_name: null };
+    return {
+      sports_json: entries.length ? JSON.stringify(entries) : null,
+      sport: primary.sport,
+      coach_id: primary.coach_id,
+      coach_name: primary.coach_name,
+      entries,
+    };
+  }
+
   app.get('/coaches', (_req, res) => {
     try { res.json(db.prepare('SELECT * FROM coaches ORDER BY id DESC').all()); }
     catch { res.status(500).json({ error: 'Failed to list coaches' }); }
@@ -123,17 +147,17 @@ module.exports = function registerCoreApi(app, db, h) {
       const dup = db.prepare('SELECT id FROM members WHERE personnel_code = ? COLLATE NOCASE').get(code);
       if (dup) return res.status(400).json({ error: 'این کد پرسنلی قبلاً ثبت شده است' });
     }
-    const cf = resolveCoachFields(b.coach_id, b.coach_name);
+    const sp = normalizeSports(b);
     try {
       const photoPath = persistPhoto(b.photo_url, 'member');
       const r = db.prepare(`INSERT INTO members (
         name, phone, expiry_date, weekly_sessions, birthday, personnel_code, coach_name, coach_id,
         attendance_count, membership_type, start_date, monthly_fee, coach_commission_percent,
         has_insurance, insurance_notes, referrer_name, referral_source, training_goal, photo_url, national_id,
-        father_name, sport, height_cm, weight_kg
-      ) VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        father_name, sport, height_cm, weight_kg, sports_json
+      ) VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
         String(b.name).trim(), String(b.phone).trim(), String(b.expiry_date).trim(), Number(b.weekly_sessions) || 0,
-        b.birthday ? String(b.birthday).trim() : null, code || null, cf.coach_name, cf.coach_id,
+        b.birthday ? String(b.birthday).trim() : null, code || null, sp.coach_name, sp.coach_id,
         b.membership_type ? String(b.membership_type).trim() : 'monthly',
         b.start_date ? String(b.start_date).trim() : todayIso(),
         Number(b.monthly_fee) || 0, Number(b.coach_commission_percent) || 0,
@@ -141,7 +165,8 @@ module.exports = function registerCoreApi(app, db, h) {
         b.referrer_name ? String(b.referrer_name).trim() : null, b.referral_source ? String(b.referral_source).trim() : null,
         b.training_goal ? String(b.training_goal).trim() : null, photoPath,
         b.national_id ? String(b.national_id).trim() : null, b.father_name ? String(b.father_name).trim() : null,
-        b.sport ? String(b.sport).trim() : null, b.height_cm != null ? Number(b.height_cm) : null, b.weight_kg != null ? Number(b.weight_kg) : null,
+        sp.sport, b.height_cm != null ? Number(b.height_cm) : null, b.weight_kg != null ? Number(b.weight_kg) : null,
+        sp.sports_json,
       );
       const row = db.prepare('SELECT * FROM members WHERE id = ?').get(r.lastInsertRowid);
       try { onMemberCreated && onMemberCreated(row); } catch {}
@@ -166,23 +191,34 @@ module.exports = function registerCoreApi(app, db, h) {
       const dup = db.prepare('SELECT id FROM members WHERE personnel_code = ? COLLATE NOCASE AND id != ?').get(String(b.personnel_code).trim(), id);
       if (dup) return res.status(400).json({ error: 'این کد پرسنلی قبلاً برای عضو دیگری ثبت شده است' });
     }
-    const cf = b.coach_id !== undefined || b.coach_name !== undefined
-      ? resolveCoachFields(b.coach_id !== undefined ? b.coach_id : existing.coach_id, b.coach_name !== undefined ? b.coach_name : existing.coach_name)
-      : { coach_id: existing.coach_id, coach_name: existing.coach_name };
+    const hasSports = Array.isArray(b.sports) || b.sport !== undefined || b.coach_id !== undefined || b.coach_name !== undefined;
+    const sp = hasSports
+      ? normalizeSports({
+          sports: b.sports,
+          sport: b.sport !== undefined ? b.sport : existing.sport,
+          coach_id: b.coach_id !== undefined ? b.coach_id : existing.coach_id,
+          coach_name: b.coach_name !== undefined ? b.coach_name : existing.coach_name,
+        })
+      : {
+          sports_json: existing.sports_json || null,
+          sport: existing.sport,
+          coach_id: existing.coach_id,
+          coach_name: existing.coach_name,
+        };
     try {
       const photoPath = b.photo_url !== undefined ? (b.photo_url ? persistPhoto(String(b.photo_url), 'member') : null) : existing.photo_url;
       db.prepare(`UPDATE members SET name=?, phone=?, expiry_date=?, weekly_sessions=?, birthday=?, personnel_code=?,
         coach_name=?, coach_id=?, membership_type=?, start_date=?, attendance_count=?,
         monthly_fee=?, coach_commission_percent=?, has_insurance=?, insurance_notes=?,
         referrer_name=?, referral_source=?, training_goal=?, photo_url=?, national_id=?,
-        father_name=?, sport=?, height_cm=?, weight_kg=? WHERE id=?`).run(
+        father_name=?, sport=?, height_cm=?, weight_kg=?, sports_json=? WHERE id=?`).run(
         b.name != null ? String(b.name).trim() : existing.name,
         b.phone != null ? String(b.phone).trim() : existing.phone,
         b.expiry_date != null ? String(b.expiry_date).trim() : existing.expiry_date,
         b.weekly_sessions != null ? Number(b.weekly_sessions) : existing.weekly_sessions,
         b.birthday !== undefined ? (b.birthday ? String(b.birthday).trim() : null) : existing.birthday,
         b.personnel_code !== undefined ? (b.personnel_code ? String(b.personnel_code).trim() : null) : existing.personnel_code,
-        cf.coach_name, cf.coach_id,
+        sp.coach_name, sp.coach_id,
         b.membership_type != null ? String(b.membership_type).trim() : existing.membership_type || 'monthly',
         b.start_date != null ? String(b.start_date).trim() : existing.start_date,
         b.attendance_count != null ? Number(b.attendance_count) : existing.attendance_count || 0,
@@ -196,9 +232,10 @@ module.exports = function registerCoreApi(app, db, h) {
         photoPath,
         b.national_id !== undefined ? (b.national_id ? String(b.national_id).trim() : null) : existing.national_id,
         b.father_name !== undefined ? (b.father_name ? String(b.father_name).trim() : null) : existing.father_name,
-        b.sport !== undefined ? (b.sport ? String(b.sport).trim() : null) : existing.sport,
+        sp.sport,
         b.height_cm !== undefined ? (b.height_cm != null ? Number(b.height_cm) : null) : existing.height_cm,
         b.weight_kg !== undefined ? (b.weight_kg != null ? Number(b.weight_kg) : null) : existing.weight_kg,
+        sp.sports_json,
         id,
       );
       const row = db.prepare('SELECT * FROM members WHERE id = ?').get(id);
@@ -279,6 +316,5 @@ module.exports = function registerCoreApi(app, db, h) {
   });
 };
 
-// optional hook if eventService not needed as hard dep
 let onMemberCreated;
 try { onMemberCreated = require('../services/eventService').onMemberCreated; } catch { onMemberCreated = null; }
