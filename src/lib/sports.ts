@@ -27,39 +27,67 @@ export function sportLabel(id: string | null | undefined): string {
   return s ? s.label : id || '—';
 }
 
-const SPORT_KEYWORDS: Record<string, string[]> = {
-  bodybuilding: ['بدنسازی'],
-  functional: ['فانکشنال'],
-  freestyle: ['فری استایل', 'فری‌استایل', 'فیری استایل'],
-  hyrox: ['هایروکس', 'هیروکس'],
-  bodypump: ['بادی پامپ', 'بادی‌پامپ', 'پامپ'],
-  yoga: ['یوگا'],
-  pilates: ['پیلاتس'],
-  crossfit: ['کراسفیت', 'کراس‌فیت', 'کراس فیت'],
-  aerofitness: ['ایروفیتنس', 'ایرو فیتنس', 'ایرو'],
-  zumba: ['زومبا'],
-  persian_dance: ['رقص ایرانی', 'رقص'],
-  crossfit_bb: ['کراسفیت + بدنسازی'],
-  boxing_trx: ['بوکس', 'trx', 'تی‌آر‌ایکس', 'تی ار ایکس'],
-};
+/** جمع شهریه ماهانه چند رشته */
+export function sumMonthlyFees(sportIds: (string | null | undefined)[]): number {
+  return sportIds.reduce((sum, id) => sum + sportFee(id), 0);
+}
 
 /**
- * با انتخاب رشته ورزشی، مناسب‌ترین مربی را برمی‌گرداند.
+ * شهریه دوره بر اساس نوع عضویت (ماهانه × تعداد ماه).
+ * monthly → ۱، quarterly → ۳، yearly/vip → ۱۲
  */
+export function computePeriodFee(
+  sportIds: (string | null | undefined)[],
+  membershipType: string,
+): number {
+  const monthly = sumMonthlyFees(sportIds);
+  const months =
+    membershipType === 'quarterly' ? 3 : membershipType === 'yearly' || membershipType === 'vip' ? 12 : 1;
+  return monthly * months;
+}
+
+const SPORT_KEYWORDS: Record<string, string[]> = {
+  bodybuilding: ['بدنسازی', 'bodybuilding'],
+  functional: ['فانکشنال', 'functional'],
+  freestyle: ['فری استایل', 'فری‌استایل', 'فیری استایل', 'freestyle'],
+  hyrox: ['هایروکس', 'هیروکس', 'hyrox'],
+  bodypump: ['بادی پامپ', 'بادی‌پامپ', 'پامپ', 'bodypump'],
+  yoga: ['یوگا', 'yoga'],
+  pilates: ['پیلاتس', 'pilates'],
+  crossfit: ['کراسفیت', 'کراس‌فیت', 'کراس فیت', 'crossfit'],
+  aerofitness: ['ایروفیتنس', 'ایرو فیتنس', 'ایرو', 'aerofitness'],
+  zumba: ['زومبا', 'zumba'],
+  persian_dance: ['رقص ایرانی', 'رقص'],
+  crossfit_bb: ['کراسفیت + بدنسازی', 'کراسفیت+بدنسازی'],
+  boxing_trx: ['بوکس', 'trx', 'تی‌آر‌ایکس', 'تی ار ایکس', 'boxing'],
+};
+
+function scoreCoachForSport(specialty: string, sportId: string): number {
+  const spec = (specialty || '').toLowerCase().trim();
+  if (!spec) return 0;
+  if (spec === sportId.toLowerCase()) return 100;
+  const label = sportLabel(sportId).toLowerCase();
+  if (spec === label) return 90;
+  if (spec.includes(label)) return 70;
+  const keys = SPORT_KEYWORDS[sportId] || [label];
+  let score = 0;
+  for (const k of keys) {
+    const kl = k.toLowerCase();
+    if (spec === kl) score = Math.max(score, 85);
+    else if (spec.includes(kl)) score = Math.max(score, 50 + Math.min(kl.length, 20));
+  }
+  return score;
+}
+
+/** با انتخاب رشته ورزشی، مناسب‌ترین مربی را برمی‌گرداند. */
 export function matchCoachForSport(
   sportId: string,
   coaches: { id: number | string; full_name: string; specialty?: string | null }[],
 ): { id: string; full_name: string } | null {
   if (!sportId || !coaches?.length) return null;
-  const keys = SPORT_KEYWORDS[sportId] || [sportLabel(sportId)];
   let best: { id: string; full_name: string; score: number } | null = null;
   for (const c of coaches) {
-    const spec = (c.specialty || '').toLowerCase();
-    if (!spec) continue;
-    let score = 0;
-    for (const k of keys) {
-      if (spec.includes(k.toLowerCase())) score += k.length + 5;
-    }
+    const score = scoreCoachForSport(c.specialty || '', sportId);
     if (score > 0 && (!best || score > best.score)) {
       best = { id: String(c.id), full_name: c.full_name, score };
     }
@@ -67,24 +95,31 @@ export function matchCoachForSport(
   return best ? { id: best.id, full_name: best.full_name } : null;
 }
 
-/**
- * با تخصص مربی، مناسب‌ترین رشته ورزشی (id) را پیدا می‌کند.
- */
+/** مربی‌ها را برای یک رشته مرتب می‌کند: مرتبط‌ها اول */
+export function sortCoachesForSport<
+  T extends { id: number | string; full_name: string; specialty?: string | null },
+>(sportId: string, coaches: T[]): T[] {
+  if (!sportId) return coaches;
+  return [...coaches].sort((a, b) => {
+    const sa = scoreCoachForSport(a.specialty || '', sportId);
+    const sb = scoreCoachForSport(b.specialty || '', sportId);
+    return sb - sa;
+  });
+}
+
+/** با تخصص مربی، مناسب‌ترین رشته ورزشی (id) را پیدا می‌کند. */
 export function matchSportForCoach(specialty: string | null | undefined): string {
   if (!specialty) return '';
-  const spec = specialty.toLowerCase();
+  const spec = specialty.toLowerCase().trim();
+  const byId = SPORTS.find((s) => s.id === specialty || s.id === spec);
+  if (byId) return byId.id;
   let bestId = '';
   let bestScore = 0;
-  for (const [id, keys] of Object.entries(SPORT_KEYWORDS)) {
-    let score = 0;
-    for (const k of keys) {
-      if (spec.includes(k.toLowerCase())) score += k.length + 5;
-    }
-    const label = sportLabel(id).toLowerCase();
-    if (spec === label || spec.includes(label)) score += 20;
+  for (const s of SPORTS) {
+    const score = scoreCoachForSport(spec, s.id);
     if (score > bestScore) {
       bestScore = score;
-      bestId = id;
+      bestId = s.id;
     }
   }
   return bestId;

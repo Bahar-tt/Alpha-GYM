@@ -1,16 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Coach } from '../services/coachService';
+import { sortCoachesForSport } from '../lib/sports';
 
 /** لیست باز: نام + رشته | مقدار بسته‌شده: فقط نام */
 export default function CoachPicker({
   coaches,
   valueId,
   displayName,
+  preferredSport,
   onSelect,
 }: {
   coaches: Coach[];
   valueId: string;
   displayName: string;
+  /** در صورت وجود، مربی‌های مرتبط با این رشته بالاتر نمایش داده می‌شوند */
+  preferredSport?: string;
   onSelect: (c: Coach | null) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -23,6 +27,11 @@ export default function CoachPicker({
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, []);
+
+  const ordered = useMemo(
+    () => (preferredSport ? sortCoachesForSport(preferredSport, coaches) : coaches),
+    [coaches, preferredSport],
+  );
 
   const selected = coaches.find((c) => String(c.id) === valueId);
 
@@ -53,7 +62,7 @@ export default function CoachPicker({
               بدون مربی
             </button>
           </li>
-          {coaches.map((c) => (
+          {ordered.map((c) => (
             <li key={c.id}>
               <button
                 type="button"
