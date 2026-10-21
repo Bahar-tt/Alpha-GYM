@@ -12,6 +12,7 @@ import {
 import { getApiErrorMessage } from '../lib/errors';
 import ProfileExtrasFields, { emptyExtras } from '../components/ProfileExtrasFields';
 import PrintCardButton from '../components/PrintCardButton';
+import { SPORTS, sportLabel } from '../lib/sports';
 import {
   UserPlus,
   Pencil,
@@ -124,12 +125,19 @@ export default function Coaches() {
     else load();
   };
 
+  /** نمایش رشته: اگر id ذخیره شده، برچسب فارسی */
+  const displaySpecialty = (spec: string | null | undefined) => {
+    if (!spec) return '—';
+    const byId = SPORTS.find((s) => s.id === spec);
+    return byId ? byId.label : spec;
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="page-title">مربیان</h1>
-          <p className="page-subtitle">ثبت مربی، رشته تخصصی و درصد حق‌الزحمه</p>
+          <p className="page-subtitle">ثبت مربی، رشته تخصصی و درصد حق‌الزحمه — افزودن و حذف مربی از همین صفحه</p>
         </div>
         <button type="button" onClick={openAdd} className="btn-primary">
           <UserPlus size={16} />
@@ -164,7 +172,7 @@ export default function Coaches() {
                       </button>
                     </td>
                     <td className="px-4 py-3.5 text-sm" style={{ color: 'var(--text-secondary)' }} dir="ltr">{c.phone || '—'}</td>
-                    <td className="px-4 py-3.5"><span className="badge badge-info">{c.specialty || '—'}</span></td>
+                    <td className="px-4 py-3.5"><span className="badge badge-info">{displaySpecialty(c.specialty)}</span></td>
                     <td className="px-4 py-3.5 text-sm font-semibold" style={{ color: 'var(--text)' }}>{(Number(c.commission_percent) || 0).toLocaleString('fa-IR')}%</td>
                     <td className="px-4 py-3.5">
                       <span className={`badge ${c.is_active !== 0 ? 'badge-success' : 'badge-danger'}`}>{c.is_active !== 0 ? 'فعال' : 'غیرفعال'}</span>
@@ -209,8 +217,34 @@ export default function Coaches() {
                 <input className="input-field" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} dir="ltr" />
               </div>
               <div>
-                <label className="block text-xs mb-1.5" style={{ color: 'var(--text-secondary)' }}>رشته تخصصی</label>
-                <input className="input-field" placeholder="مثلاً بدنسازی، یوگا، کراس‌فیت" value={form.specialty} onChange={(e) => setForm({ ...form, specialty: e.target.value })} />
+                <label className="block text-xs mb-1.5" style={{ color: 'var(--text-secondary)' }}>رشته تخصصی *</label>
+                <select
+                  className="input-field"
+                  value={
+                    SPORTS.some((s) => s.id === form.specialty || s.label === form.specialty)
+                      ? (SPORTS.find((s) => s.id === form.specialty || s.label === form.specialty)?.id || '')
+                      : form.specialty
+                        ? form.specialty
+                        : ''
+                  }
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    if (!id) {
+                      setForm({ ...form, specialty: '' });
+                      return;
+                    }
+                    const label = sportLabel(id);
+                    setForm({ ...form, specialty: label === '—' ? id : label });
+                  }}
+                >
+                  <option value="">انتخاب رشته</option>
+                  {SPORTS.map((s) => (
+                    <option key={s.id} value={s.id}>{s.label}</option>
+                  ))}
+                </select>
+                <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                  با انتخاب رشته، در فرم عضو به‌صورت خودکار این مربی پیشنهاد می‌شود.
+                </p>
               </div>
               <div>
                 <label className="block text-xs mb-1.5" style={{ color: 'var(--text-secondary)' }}>درصد حق مربی (پیش‌فرض)</label>
@@ -266,7 +300,7 @@ export default function Coaches() {
                   </div>
                   <div>
                     <h2 className="text-lg font-bold text-white">{profile.full_name}</h2>
-                    <p className="text-white/70 text-sm">{profile.specialty || 'بدون رشته'}</p>
+                    <p className="text-white/70 text-sm">{displaySpecialty(profile.specialty)}</p>
                   </div>
                 </div>
                 <button type="button" onClick={() => setProfile(null)} className="text-white/80"><X size={18} /></button>
