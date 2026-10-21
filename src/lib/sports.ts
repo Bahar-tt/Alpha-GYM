@@ -1,18 +1,25 @@
-/** رشته‌های ورزشی باشگاه (متناسب با مربیان واقعی) + شهریه ماهانه (تومان) */
+/** رشته‌های ورزشی + شهریه پایه (بسته ۱۲ جلسه — تومان) مطابق لیست قیمت باشگاه */
 export const SPORTS = [
-  { id: 'bodybuilding', label: 'بدنسازی', monthly_fee: 2500000 },
-  { id: 'functional', label: 'فانکشنال فیتنس', monthly_fee: 2200000 },
-  { id: 'freestyle', label: 'فری استایل', monthly_fee: 2200000 },
-  { id: 'hyrox', label: 'هایروکس', monthly_fee: 2300000 },
-  { id: 'bodypump', label: 'بادی پامپ', monthly_fee: 2000000 },
-  { id: 'yoga', label: 'یوگا', monthly_fee: 1800000 },
-  { id: 'pilates', label: 'پیلاتس', monthly_fee: 1800000 },
-  { id: 'crossfit', label: 'کراسفیت', monthly_fee: 2400000 },
-  { id: 'aerofitness', label: 'ایروفیتنس', monthly_fee: 2000000 },
-  { id: 'zumba', label: 'زومبا', monthly_fee: 1700000 },
-  { id: 'persian_dance', label: 'رقص ایرانی', monthly_fee: 1700000 },
-  { id: 'crossfit_bb', label: 'کراسفیت + بدنسازی', monthly_fee: 2500000 },
-  { id: 'boxing_trx', label: 'بوکس + TRX', monthly_fee: 2300000 },
+  { id: 'bodybuilding', label: 'بدنسازی', monthly_fee: 1000000 },
+  { id: 'bodybuilding_8', label: 'بدنسازی (۸ جلسه)', monthly_fee: 850000 },
+  { id: 'bodybuilding_16', label: 'بدنسازی (۱۶ جلسه)', monthly_fee: 1200000 },
+  { id: 'bodybuilding_24', label: 'بدنسازی (۲۴ جلسه)', monthly_fee: 1500000 },
+  { id: 'crossfit', label: 'کراسفیت', monthly_fee: 1200000 },
+  { id: 'functional', label: 'فانکشنال فیتنس', monthly_fee: 800000 },
+  { id: 'freestyle', label: 'فری استایل', monthly_fee: 800000 },
+  { id: 'bodypump', label: 'بادی پامپ', monthly_fee: 1000000 },
+  { id: 'hyrox', label: 'هایروکس', monthly_fee: 1000000 },
+  { id: 'aerial', label: 'اریال', monthly_fee: 1000000 },
+  { id: 'boxing', label: 'بوکس', monthly_fee: 950000 },
+  { id: 'trx', label: 'TRX', monthly_fee: 850000 },
+  { id: 'zumba', label: 'زومبا', monthly_fee: 800000 },
+  { id: 'persian_dance', label: 'رقص ایرانی', monthly_fee: 800000 },
+  { id: 'yoga', label: 'یوگا', monthly_fee: 800000 },
+  { id: 'aerofitness', label: 'ایروفیتنس', monthly_fee: 800000 },
+  { id: 'pilates', label: 'پیلاتس', monthly_fee: 800000 },
+  { id: 'crossfit_bb', label: 'کراسفیت + بدنسازی', monthly_fee: 1500000 },
+  { id: 'boxing_trx', label: 'بوکس + TRX', monthly_fee: 1500000 },
+  { id: 'custom', label: 'سایر (سفارشی)', monthly_fee: 0 },
 ] as const;
 
 export type SportId = (typeof SPORTS)[number]['id'];
@@ -33,7 +40,7 @@ export function sumMonthlyFees(sportIds: (string | null | undefined)[]): number 
 }
 
 /**
- * شهریه دوره بر اساس نوع عضویت (ماهانه × تعداد ماه).
+ * شهریه دوره بر اساس نوع عضویت (پایه × تعداد ماه).
  * monthly → ۱، quarterly → ۳، yearly/vip → ۱۲
  */
 export function computePeriodFee(
@@ -48,6 +55,9 @@ export function computePeriodFee(
 
 const SPORT_KEYWORDS: Record<string, string[]> = {
   bodybuilding: ['بدنسازی', 'bodybuilding'],
+  bodybuilding_8: ['بدنسازی (۸', '۸ جلسه'],
+  bodybuilding_16: ['بدنسازی (۱۶', '۱۶ جلسه'],
+  bodybuilding_24: ['بدنسازی (۲۴', '۲۴ جلسه'],
   functional: ['فانکشنال', 'functional'],
   freestyle: ['فری استایل', 'فری‌استایل', 'فیری استایل', 'freestyle'],
   hyrox: ['هایروکس', 'هیروکس', 'hyrox'],
@@ -58,8 +68,12 @@ const SPORT_KEYWORDS: Record<string, string[]> = {
   aerofitness: ['ایروفیتنس', 'ایرو فیتنس', 'ایرو', 'aerofitness'],
   zumba: ['زومبا', 'zumba'],
   persian_dance: ['رقص ایرانی', 'رقص'],
+  aerial: ['اریال', 'aerial'],
+  boxing: ['بوکس', 'boxing'],
+  trx: ['trx', 'تی‌آر‌ایکس', 'تی ار ایکس'],
   crossfit_bb: ['کراسفیت + بدنسازی', 'کراسفیت+بدنسازی'],
-  boxing_trx: ['بوکس', 'trx', 'تی‌آر‌ایکس', 'تی ار ایکس', 'boxing'],
+  boxing_trx: ['بوکس + TRX', 'بوکس+trx'],
+  custom: ['سایر', 'سفارشی'],
 };
 
 function scoreCoachForSport(specialty: string, sportId: string): number {
