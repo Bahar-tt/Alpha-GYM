@@ -24,7 +24,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       const saved = localStorage.getItem(STORAGE_KEY) as Theme | null;
       if (saved === 'light' || saved === 'dark') return saved;
     } catch { /* ignore */ }
-    return 'light';
+    // برند آلفا: تم تیره پیش‌فرض برای حس حرفه‌ای و قوی
+    return 'dark';
   });
 
   useEffect(() => {
