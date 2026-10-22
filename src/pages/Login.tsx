@@ -27,30 +27,26 @@ export default function Login() {
 
   return (
     <div dir="rtl" className="min-h-screen flex" style={{ background: 'var(--bg)' }}>
-      {/* پنل بصری — دیوار سبز باشگاه + لوگو */}
+      {/* پنل بصری — عکس باشگاه از public/v4.png */}
       <div className="hidden lg:flex lg:w-[50%] relative overflow-hidden flex-col justify-between p-10 xl:p-14">
-        <div
-          className="absolute inset-0"
-          style={{
-            backgroundImage: "url('/login-bg.svg')",
-            backgroundSize: 'cover',
-            backgroundPosition: 'center center',
-            filter: 'saturate(1.15) contrast(1.08)',
-          }}
+        <img
+          src="/v4.png"
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ filter: 'saturate(1.1) contrast(1.05)' }}
         />
-        {/* اورلی سبک‌تر تا دیوار سبز و لوگو دیده شود */}
         <div
           className="absolute inset-0"
           style={{
             background:
-              'linear-gradient(165deg, rgba(5,8,7,0.55) 0%, rgba(5,8,7,0.25) 40%, rgba(5,8,7,0.72) 100%)',
+              'linear-gradient(165deg, rgba(5,8,7,0.58) 0%, rgba(5,8,7,0.28) 42%, rgba(5,8,7,0.75) 100%)',
           }}
         />
         <div
           className="absolute inset-0 pointer-events-none"
           style={{
             background:
-              'radial-gradient(ellipse 70% 50% at 50% 40%, rgba(163,230,53,0.12), transparent 65%)',
+              'radial-gradient(ellipse 70% 50% at 50% 40%, rgba(163,230,53,0.14), transparent 65%)',
           }}
         />
 
@@ -67,7 +63,7 @@ export default function Login() {
           </div>
           <div>
             <p
-              className="text-white font-black tracking-[0.08em] text-xl"
+              className="text-white font-black text-xl"
               style={{ letterSpacing: '0.12em', textShadow: '0 2px 12px rgba(0,0,0,0.5)' }}
             >
               ALPHA GYM
