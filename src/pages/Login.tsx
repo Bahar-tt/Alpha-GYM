@@ -27,40 +27,40 @@ export default function Login() {
 
   return (
     <div dir="rtl" className="min-h-screen flex" style={{ background: 'var(--bg)' }}>
-      {/* پنل بصری — تصویر باشگاه + لوگو */}
+      {/* پنل بصری — دیوار سبز باشگاه + لوگو */}
       <div className="hidden lg:flex lg:w-[50%] relative overflow-hidden flex-col justify-between p-10 xl:p-14">
         <div
-          className="absolute inset-0 scale-105"
+          className="absolute inset-0"
           style={{
             backgroundImage: "url('/login-bg.svg')",
             backgroundSize: 'cover',
-            backgroundPosition: 'center',
-            filter: 'saturate(1.05) contrast(1.05)',
+            backgroundPosition: 'center center',
+            filter: 'saturate(1.15) contrast(1.08)',
           }}
         />
+        {/* اورلی سبک‌تر تا دیوار سبز و لوگو دیده شود */}
         <div
           className="absolute inset-0"
           style={{
             background:
-              'linear-gradient(165deg, rgba(5,8,7,0.82) 0%, rgba(8,16,10,0.55) 42%, rgba(5,8,7,0.88) 100%)',
+              'linear-gradient(165deg, rgba(5,8,7,0.55) 0%, rgba(5,8,7,0.25) 40%, rgba(5,8,7,0.72) 100%)',
           }}
         />
         <div
           className="absolute inset-0 pointer-events-none"
           style={{
             background:
-              'radial-gradient(ellipse 80% 55% at 75% 35%, rgba(163,230,53,0.18), transparent 60%)',
+              'radial-gradient(ellipse 70% 50% at 50% 40%, rgba(163,230,53,0.12), transparent 65%)',
           }}
         />
 
-        {/* لوگو بالا */}
         <div className="relative z-10 flex items-center gap-4">
           <div
             className="w-16 h-16 rounded-2xl flex items-center justify-center shrink-0"
             style={{
-              background: 'rgba(5,8,7,0.55)',
-              border: '1px solid rgba(163,230,53,0.45)',
-              boxShadow: '0 0 32px rgba(163,230,53,0.35)',
+              background: 'rgba(5,8,7,0.65)',
+              border: '1px solid rgba(163,230,53,0.5)',
+              boxShadow: '0 0 32px rgba(163,230,53,0.4)',
             }}
           >
             <img src="/v5.png" alt="Alpha GYM" className="w-12 h-12 object-contain" />
@@ -68,7 +68,7 @@ export default function Login() {
           <div>
             <p
               className="text-white font-black tracking-[0.08em] text-xl"
-              style={{ letterSpacing: '0.12em' }}
+              style={{ letterSpacing: '0.12em', textShadow: '0 2px 12px rgba(0,0,0,0.5)' }}
             >
               ALPHA GYM
             </p>
@@ -78,7 +78,6 @@ export default function Login() {
           </div>
         </div>
 
-        {/* تیتر اصلی — قوی و حرفه‌ای */}
         <div className="relative z-10 max-w-lg space-y-5">
           <div
             className="h-1 w-16 rounded-full"
@@ -89,7 +88,7 @@ export default function Login() {
             style={{
               fontSize: 'clamp(2.4rem, 4.2vw, 3.35rem)',
               letterSpacing: '-0.03em',
-              textShadow: '0 4px 32px rgba(0,0,0,0.45)',
+              textShadow: '0 4px 28px rgba(0,0,0,0.55)',
             }}
           >
             مدیریت حرفه‌ای
@@ -98,7 +97,7 @@ export default function Login() {
           </h2>
           <p
             className="text-base font-medium leading-relaxed max-w-md"
-            style={{ color: 'rgba(240,253,244,0.78)' }}
+            style={{ color: 'rgba(240,253,244,0.88)', textShadow: '0 1px 8px rgba(0,0,0,0.4)' }}
           >
             اعضا، تمدید، پیامک و گزارش‌ها — یک پنل یکپارچه برای باشگاهی که جدی کار می‌کند.
           </p>
@@ -108,9 +107,10 @@ export default function Login() {
                 key={t}
                 className="px-3.5 py-1.5 rounded-full text-xs font-bold tracking-wide"
                 style={{
-                  background: 'rgba(163,230,53,0.12)',
-                  border: '1px solid rgba(163,230,53,0.35)',
+                  background: 'rgba(5,8,7,0.45)',
+                  border: '1px solid rgba(163,230,53,0.4)',
                   color: '#ecfccb',
+                  backdropFilter: 'blur(6px)',
                 }}
               >
                 {t}
@@ -119,12 +119,14 @@ export default function Login() {
           </div>
         </div>
 
-        <p className="relative z-10 text-[11px] font-medium tracking-[0.2em] uppercase" style={{ color: 'rgba(255,255,255,0.35)' }}>
+        <p
+          className="relative z-10 text-[11px] font-medium tracking-[0.2em] uppercase"
+          style={{ color: 'rgba(255,255,255,0.4)' }}
+        >
           Alpha GYM · Management System
         </p>
       </div>
 
-      {/* فرم ورود */}
       <div className="flex-1 flex flex-col items-center justify-center px-6 py-12 relative">
         <div
           className="absolute inset-0 pointer-events-none opacity-[0.04] dark:opacity-[0.07]"
