@@ -27,28 +27,34 @@ export default function Login() {
 
   return (
     <div dir="rtl" className="min-h-screen relative flex items-center justify-center px-4 py-10 overflow-hidden">
-      {/* پس‌زمینه — عکس باشگاه */}
+      {/* عکس باشگاه — لایه شیشه‌ای (بلور + کمی بزرگ‌تر) */}
       <div
-        className="absolute inset-0"
+        className="absolute inset-0 scale-110"
         style={{
           backgroundImage: "url('/gym-hero.jpg'), url('/login-bg.svg')",
           backgroundSize: 'cover',
           backgroundPosition: 'center',
           backgroundRepeat: 'no-repeat',
+          filter: 'blur(14px) saturate(1.15) brightness(0.75)',
+          transform: 'scale(1.12)',
         }}
       />
+      {/* لایه شیشه‌ای نیمه‌شفاف */}
       <div
         className="absolute inset-0"
         style={{
           background:
-            'linear-gradient(160deg, rgba(3,6,5,0.9) 0%, rgba(5,10,8,0.8) 45%, rgba(3,6,5,0.93) 100%)',
+            'linear-gradient(165deg, rgba(5,10,8,0.45) 0%, rgba(8,16,12,0.35) 50%, rgba(5,10,8,0.55) 100%)',
+          backdropFilter: 'blur(2px)',
+          WebkitBackdropFilter: 'blur(2px)',
         }}
       />
+      {/* هاله سبز شیشه‌ای */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
           background:
-            'radial-gradient(ellipse 60% 45% at 50% 28%, rgba(163,230,53,0.1), transparent 70%)',
+            'radial-gradient(ellipse 55% 40% at 50% 35%, rgba(163,230,53,0.14), transparent 65%)',
         }}
       />
 
@@ -57,61 +63,73 @@ export default function Login() {
         onClick={toggleTheme}
         className="absolute top-5 left-5 z-20 p-2.5 rounded-xl"
         style={{
-          background: 'rgba(255,255,255,0.06)',
-          color: 'rgba(255,255,255,0.7)',
-          border: '1px solid rgba(255,255,255,0.1)',
+          background: 'rgba(255,255,255,0.08)',
+          color: 'rgba(255,255,255,0.75)',
+          border: '1px solid rgba(255,255,255,0.12)',
+          backdropFilter: 'blur(12px)',
         }}
         title={theme === 'light' ? 'حالت تاریک' : 'حالت روشن'}
       >
         {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
       </button>
 
-      <div className="relative z-10 w-full max-w-[400px] animate-fade-in">
-        <div className="text-center mb-8">
+      <div className="relative z-10 w-full max-w-[420px] animate-fade-in">
+        <div className="text-center mb-7">
+          {/* لوگو بزرگ */}
           <div
-            className="mx-auto mb-5 w-[72px] h-[72px] rounded-2xl flex items-center justify-center"
+            className="mx-auto mb-5 w-[120px] h-[120px] sm:w-[140px] sm:h-[140px] rounded-3xl flex items-center justify-center"
             style={{
-              background: 'rgba(8,12,10,0.8)',
+              background: 'rgba(8,14,11,0.55)',
               border: '1px solid rgba(163,230,53,0.4)',
-              boxShadow: '0 0 40px rgba(163,230,53,0.22)',
+              boxShadow:
+                '0 0 48px rgba(163,230,53,0.28), 0 12px 40px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(255,255,255,0.06)',
+              backdropFilter: 'blur(16px)',
+              WebkitBackdropFilter: 'blur(16px)',
             }}
           >
-            <img src="/v5.png" alt="Alpha GYM" className="w-12 h-12 object-contain" />
+            <img
+              src="/v5.png"
+              alt="Alpha GYM"
+              className="w-[88px] h-[88px] sm:w-[100px] sm:h-[100px] object-contain"
+            />
           </div>
-          <p className="text-white font-black text-sm mb-3" style={{ letterSpacing: '0.22em' }}>
+          <p className="text-white font-black text-base mb-2" style={{ letterSpacing: '0.28em' }}>
             ALPHA GYM
           </p>
           <h1
             className="text-white font-black leading-tight"
             style={{
-              fontSize: 'clamp(1.7rem, 4vw, 2.1rem)',
+              fontSize: 'clamp(1.75rem, 4.2vw, 2.2rem)',
               letterSpacing: '-0.02em',
+              textShadow: '0 2px 20px rgba(0,0,0,0.35)',
             }}
           >
             مدیریت حرفه‌ای باشگاه
           </h1>
-          <p className="mt-2 text-sm font-medium" style={{ color: 'rgba(190,242,100,0.75)' }}>
+          <p className="mt-2 text-sm font-semibold" style={{ color: 'rgba(190,242,100,0.85)' }}>
             قدرت · نظم · نتیجه
           </p>
         </div>
 
+        {/* کارت فرم شیشه‌ای */}
         <div
-          className="rounded-2xl p-7 sm:p-8"
+          className="rounded-3xl p-7 sm:p-8"
           style={{
-            background: 'rgba(12,18,16,0.85)',
-            border: '1px solid rgba(163,230,53,0.16)',
-            boxShadow: '0 24px 64px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.03)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
+            background: 'rgba(12,18,16,0.45)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            boxShadow:
+              '0 24px 64px rgba(0,0,0,0.4), inset 0 0 0 1px rgba(163,230,53,0.08)',
+            backdropFilter: 'blur(24px) saturate(1.2)',
+            WebkitBackdropFilter: 'blur(24px) saturate(1.2)',
           }}
         >
           {error && (
             <div
               className="mb-4 p-3 rounded-xl text-sm font-medium"
               style={{
-                background: 'rgba(248,113,113,0.12)',
+                background: 'rgba(248,113,113,0.15)',
                 color: '#fca5a5',
-                border: '1px solid rgba(248,113,113,0.25)',
+                border: '1px solid rgba(248,113,113,0.28)',
               }}
             >
               {error}
@@ -120,21 +138,22 @@ export default function Login() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold mb-1.5" style={{ color: 'rgba(255,255,255,0.55)' }}>
+              <label className="block text-xs font-bold mb-1.5" style={{ color: 'rgba(255,255,255,0.6)' }}>
                 نام کاربری
               </label>
               <div className="relative">
                 <User
                   size={16}
                   className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                  style={{ color: 'rgba(255,255,255,0.35)' }}
+                  style={{ color: 'rgba(255,255,255,0.4)' }}
                 />
                 <input
                   type="text"
                   className="w-full rounded-xl py-3 pr-10 pl-4 text-sm text-white outline-none"
                   style={{
-                    background: 'rgba(255,255,255,0.06)',
-                    border: '1px solid rgba(255,255,255,0.1)',
+                    background: 'rgba(255,255,255,0.08)',
+                    border: '1px solid rgba(255,255,255,0.14)',
+                    backdropFilter: 'blur(8px)',
                   }}
                   placeholder="admin"
                   value={username}
@@ -142,11 +161,11 @@ export default function Login() {
                   required
                   autoComplete="username"
                   onFocus={(e) => {
-                    e.currentTarget.style.borderColor = 'rgba(163,230,53,0.5)';
-                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(163,230,53,0.12)';
+                    e.currentTarget.style.borderColor = 'rgba(163,230,53,0.55)';
+                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(163,230,53,0.14)';
                   }}
                   onBlur={(e) => {
-                    e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
+                    e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)';
                     e.currentTarget.style.boxShadow = 'none';
                   }}
                 />
@@ -154,21 +173,22 @@ export default function Login() {
             </div>
 
             <div>
-              <label className="block text-xs font-bold mb-1.5" style={{ color: 'rgba(255,255,255,0.55)' }}>
+              <label className="block text-xs font-bold mb-1.5" style={{ color: 'rgba(255,255,255,0.6)' }}>
                 رمز عبور
               </label>
               <div className="relative">
                 <Lock
                   size={16}
                   className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                  style={{ color: 'rgba(255,255,255,0.35)' }}
+                  style={{ color: 'rgba(255,255,255,0.4)' }}
                 />
                 <input
                   type={showPassword ? 'text' : 'password'}
                   className="w-full rounded-xl py-3 pr-10 pl-10 text-sm text-white outline-none"
                   style={{
-                    background: 'rgba(255,255,255,0.06)',
-                    border: '1px solid rgba(255,255,255,0.1)',
+                    background: 'rgba(255,255,255,0.08)',
+                    border: '1px solid rgba(255,255,255,0.14)',
+                    backdropFilter: 'blur(8px)',
                   }}
                   placeholder="••••••••"
                   value={password}
@@ -176,11 +196,11 @@ export default function Login() {
                   required
                   autoComplete="current-password"
                   onFocus={(e) => {
-                    e.currentTarget.style.borderColor = 'rgba(163,230,53,0.5)';
-                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(163,230,53,0.12)';
+                    e.currentTarget.style.borderColor = 'rgba(163,230,53,0.55)';
+                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(163,230,53,0.14)';
                   }}
                   onBlur={(e) => {
-                    e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
+                    e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)';
                     e.currentTarget.style.boxShadow = 'none';
                   }}
                 />
@@ -188,7 +208,7 @@ export default function Login() {
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute left-3.5 top-1/2 -translate-y-1/2 p-0.5"
-                  style={{ color: 'rgba(255,255,255,0.4)' }}
+                  style={{ color: 'rgba(255,255,255,0.45)' }}
                 >
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
@@ -202,11 +222,13 @@ export default function Login() {
               style={{
                 background: 'linear-gradient(135deg, #bef264 0%, #a3e635 45%, #65a30d 100%)',
                 color: '#0a1208',
-                boxShadow: '0 8px 28px -6px rgba(163,230,53,0.45)',
-                border: '1px solid rgba(220,252,150,0.35)',
+                boxShadow: '0 8px 28px -6px rgba(163,230,53,0.5)',
+                border: '1px solid rgba(220,252,150,0.4)',
               }}
             >
-              {loading ? 'در حال ورود...' : (
+              {loading ? (
+                'در حال ورود...'
+              ) : (
                 <>
                   ورود به سیستم
                   <ArrowLeft size={18} />
@@ -216,7 +238,7 @@ export default function Login() {
           </form>
         </div>
 
-        <p className="text-center text-xs mt-6 font-medium" style={{ color: 'rgba(255,255,255,0.28)' }}>
+        <p className="text-center text-xs mt-6 font-medium" style={{ color: 'rgba(255,255,255,0.32)' }}>
           Alpha GYM · Management System
         </p>
       </div>
