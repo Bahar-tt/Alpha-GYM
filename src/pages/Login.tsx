@@ -27,7 +27,6 @@ export default function Login() {
 
   return (
     <div dir="rtl" className="min-h-screen flex" style={{ background: 'var(--bg)' }}>
-      {/* Visual panel (RTL = right side) — gym photo background */}
       <div className="hidden lg:flex lg:w-[48%] relative overflow-hidden flex-col justify-between p-12">
         <div
           className="absolute inset-0"
@@ -41,18 +40,32 @@ export default function Login() {
           className="absolute inset-0"
           style={{
             background:
-              'linear-gradient(160deg, rgba(8,20,35,0.72) 0%, rgba(12,40,70,0.55) 45%, rgba(8,20,35,0.78) 100%)',
+              'linear-gradient(160deg, rgba(5,8,7,0.88) 0%, rgba(10,24,12,0.75) 45%, rgba(5,8,7,0.9) 100%)',
+          }}
+        />
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background:
+              'radial-gradient(ellipse 70% 50% at 70% 40%, rgba(163,230,53,0.12), transparent)',
           }}
         />
 
         <div className="relative z-10">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-white/15 backdrop-blur flex items-center justify-center">
+            <div
+              className="w-12 h-12 rounded-2xl flex items-center justify-center"
+              style={{
+                background: 'rgba(163,230,53,0.12)',
+                border: '1px solid rgba(163,230,53,0.35)',
+                boxShadow: '0 0 24px rgba(163,230,53,0.25)',
+              }}
+            >
               <img src="/v5.png" alt="" className="w-9 h-9 object-contain" />
             </div>
             <div>
               <p className="text-white font-bold text-lg tracking-tight">Alpha GYM</p>
-              <p className="text-white/60 text-xs">Smart Club Platform</p>
+              <p className="text-sm" style={{ color: 'rgba(190,242,100,0.85)' }}>قدرت · نظم · نتیجه</p>
             </div>
           </div>
         </div>
@@ -61,17 +74,21 @@ export default function Login() {
           <h2 className="text-4xl font-extrabold text-white leading-tight">
             مدیریت حرفه‌ای
             <br />
-            باشگاه شما
+            <span style={{ color: '#bef264' }}>باشگاه شما</span>
           </h2>
-          <p className="text-white/80 text-sm leading-relaxed">
-            اعضا، تمدید، پیامک و گزارش‌ها را از یک پنل یکپارچه و مدرن مدیریت کنید.
+          <p className="text-white/75 text-sm leading-relaxed">
+            اعضا، تمدید، پیامک و گزارش‌ها را از یک پنل یکپارچه و قدرتمند مدیریت کنید.
           </p>
           <div className="flex gap-3">
             {['اعضا', 'پیامک', 'گزارش'].map((t) => (
               <span
                 key={t}
-                className="px-3 py-1.5 rounded-full text-xs font-medium text-white/90"
-                style={{ background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.22)' }}
+                className="px-3 py-1.5 rounded-full text-xs font-medium"
+                style={{
+                  background: 'rgba(163,230,53,0.12)',
+                  border: '1px solid rgba(163,230,53,0.3)',
+                  color: '#d9f99d',
+                }}
               >
                 {t}
               </span>
@@ -79,7 +96,7 @@ export default function Login() {
           </div>
         </div>
 
-        <p className="relative z-10 text-white/45 text-xs">Alpha GYM Management System</p>
+        <p className="relative z-10 text-white/40 text-xs">Alpha GYM Management System</p>
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center px-6 py-12 relative">
@@ -96,13 +113,17 @@ export default function Login() {
           <div className="lg:hidden flex items-center gap-3 mb-8 justify-center">
             <div
               className="w-12 h-12 rounded-2xl flex items-center justify-center"
-              style={{ background: 'linear-gradient(135deg, #0c8ce7, #006fc5)' }}
+              style={{
+                background: 'linear-gradient(135deg, #1a2e14, #0a1208)',
+                boxShadow: '0 0 20px rgba(163,230,53,0.3)',
+                border: '1px solid rgba(163,230,53,0.35)',
+              }}
             >
               <img src="/v5.png" alt="" className="w-9 h-9 object-contain" />
             </div>
             <div>
               <p className="font-bold text-lg" style={{ color: 'var(--text)' }}>Alpha GYM</p>
-              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>مدیریت باشگاه</p>
+              <p className="text-xs" style={{ color: 'var(--accent)' }}>قدرت · نظم · نتیجه</p>
             </div>
           </div>
 
