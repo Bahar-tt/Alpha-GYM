@@ -1,27 +1,37 @@
 /**
  * وارد کردن اعضا از فایل members-import.json
  *
- * استفاده:
- *   1) فایل members-import.json را کنار این اسکریپت بگذارید (پوشه backend)
- *   2) node seed-members.js
- *
- * اگر فایل را از گیت‌هاب گرفتید:
- *   بعد از git pull داخل backend همین دستور را بزنید.
+ * مراحل:
+ *   1) فایل members-import.json را داخل پوشه backend بگذارید
+ *      (همان فایلی که از چت دانلود می‌کنید)
+ *   2) در PowerShell:
+ *        cd E:\Alpha-GYM\backend
+ *        node seed-members.js
  */
 const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
 
 const dbPath = path.join(__dirname, 'gym.db');
-const jsonPath = path.join(__dirname, 'members-import.json');
+const candidates = [
+  path.join(__dirname, 'members-import.json'),
+  path.join(__dirname, '..', 'members-import.json'),
+  path.join(process.cwd(), 'members-import.json'),
+];
 
-if (!fs.existsSync(jsonPath)) {
+const jsonPath = candidates.find((p) => fs.existsSync(p));
+if (!jsonPath) {
   console.error('فایل members-import.json پیدا نشد.');
-  console.error('مسیر انتظار:', jsonPath);
+  console.error('آن را داخل پوشه backend بگذارید، سپس دوباره اجرا کنید.');
   process.exit(1);
 }
 
+console.log('خواندن از:', jsonPath);
 const members = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+if (!Array.isArray(members) || members.length === 0) {
+  console.error('فایل خالی یا نامعتبر است.');
+  process.exit(1);
+}
 console.log('تعداد رکورد در فایل:', members.length);
 
 const db = new Database(dbPath);
@@ -87,26 +97,14 @@ let skipped = 0;
 const tx = db.transaction((list) => {
   for (const m of list) {
     const name = (m.name || '').trim();
-    if (!name) {
-      skipped++;
-      continue;
-    }
+    if (!name) { skipped++; continue; }
     const phone = (m.phone || '').trim() || '00000000000';
     const nid = (m.national_id || '').trim();
     const pc = (m.personnel_code || '').trim();
 
-    if (nid && existingNid.has(nid)) {
-      skipped++;
-      continue;
-    }
-    if (phone && phone !== '00000000000' && existingPhone.has(phone)) {
-      skipped++;
-      continue;
-    }
-    if (pc && existingPc.has(pc)) {
-      skipped++;
-      continue;
-    }
+    if (nid && existingNid.has(nid)) { skipped++; continue; }
+    if (phone && phone !== '00000000000' && existingPhone.has(phone)) { skipped++; continue; }
+    if (pc && existingPc.has(pc)) { skipped++; continue; }
 
     insert.run({
       name,
