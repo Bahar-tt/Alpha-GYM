@@ -89,43 +89,40 @@ export default function Layout() {
         />
       )}
 
-      {/* ── Sidebar — soft theme-aware ── */}
       <aside
         className={`sidebar-brand-bar fixed top-0 bottom-0 right-0 z-50 flex flex-col transition-transform duration-300 ease-out ${
           mobileOpen ? 'translate-x-0' : 'translate-x-full'
         } lg:!translate-x-0`}
         style={{ width: SIDEBAR_W }}
       >
-        {/* Soft sky accent line */}
         <div
           className="h-[2px] shrink-0 w-full"
           style={{
             background: 'linear-gradient(90deg, transparent, var(--accent), transparent)',
-            opacity: 0.7,
+            opacity: 0.85,
           }}
         />
 
-        {/* Brand */}
         <div
           className="h-16 shrink-0 px-5 flex items-center gap-3"
           style={{ borderBottom: '1px solid var(--border-sidebar)' }}
         >
           <div
-            className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden shrink-0 animate-soft-pulse"
+            className="w-11 h-11 rounded-xl flex items-center justify-center overflow-hidden shrink-0 animate-soft-pulse"
             style={{
-              background: 'linear-gradient(145deg, #38bdf8, #0ea5e9 50%, #0284c7)',
-              boxShadow: '0 4px 14px rgba(14, 165, 233, 0.3)',
+              background: 'linear-gradient(145deg, #0a1208 0%, #1a2e14 50%, #0c1810 100%)',
+              boxShadow: '0 0 20px rgba(163, 230, 53, 0.35), inset 0 0 0 1px rgba(163, 230, 53, 0.35)',
             }}
           >
-            <img src="/v5.png" alt="Alpha" className="w-8 h-8 object-contain" />
+            <img src="/v5.png" alt="Alpha" className="w-9 h-9 object-contain" />
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="text-sm font-bold tracking-wide" style={{ color: 'var(--text)' }}>
               Alpha GYM
             </h1>
-            <p className="text-[10px] flex items-center gap-1" style={{ color: 'var(--accent)' }}>
+            <p className="text-[10px] flex items-center gap-1 font-medium" style={{ color: 'var(--accent)' }}>
               <Sparkles size={10} />
-              پلتفرم هوشمند باشگاه
+              قدرت · نظم · نتیجه
             </p>
           </div>
           <button
@@ -138,7 +135,6 @@ export default function Layout() {
           </button>
         </div>
 
-        {/* Nav */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <p
             className="px-3 mb-2.5 text-[10px] font-bold tracking-[0.12em] uppercase"
@@ -166,19 +162,19 @@ export default function Layout() {
           </ul>
         </nav>
 
-        {/* Footer */}
         <div className="shrink-0 p-4" style={{ borderTop: '1px solid var(--border-sidebar)' }}>
           <div
             className="mb-3 p-3 rounded-xl flex items-center gap-2.5"
             style={{
               background: 'var(--accent-soft)',
-              border: '1px solid color-mix(in srgb, var(--accent) 22%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--accent) 28%, transparent)',
             }}
           >
             <div
-              className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 text-white"
+              className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold shrink-0"
               style={{
-                background: 'linear-gradient(135deg, #38bdf8, #0284c7)',
+                background: 'linear-gradient(135deg, #bef264, #65a30d)',
+                color: '#0a1208',
               }}
             >
               {displayName.charAt(0)}
@@ -215,7 +211,6 @@ export default function Layout() {
         </div>
       </aside>
 
-      {/* ── Main ── */}
       <div className="min-h-screen flex flex-col">
         <div className="lg:pr-[280px] min-h-screen flex flex-col w-full">
           <header
