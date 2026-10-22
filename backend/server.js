@@ -104,6 +104,8 @@ registerSystemRoutes(app, db, { uploadsDir: UPLOADS_DIR });
 
 // load remaining route modules (members, coaches, sms, attendance)
 require('./routes/coreApi')(app, db, { persistPhoto, createReceipt, todayIso, sendSMS, SMS_SEND_DELAY_MS, delay });
+// fingerprint / card agent
+require('./routes/attendanceScan')(app, db);
 
 const distPath = path.join(__dirname, '..', 'dist');
 if (fs.existsSync(distPath)) {
