@@ -2,11 +2,10 @@ import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Lock, User, Sun, Moon, ArrowLeft } from 'lucide-react';
+import { Eye, EyeOff, Lock, User, ArrowLeft } from 'lucide-react';
 
 export default function Login() {
   const { signIn } = useAuth();
-  const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
 
   const [username, setUsername] = useState('');
@@ -26,110 +25,96 @@ export default function Login() {
   };
 
   return (
-    <div dir="rtl" className="min-h-screen relative flex items-center justify-center px-4 py-10 overflow-hidden">
-      {/* عکس باشگاه — لایه شیشه‌ای (بلور + کمی بزرگ‌تر) */}
+    <div dir="rtl" className="min-h-screen relative flex flex-col items-center justify-center px-4 py-10 overflow-hidden" style={{ background: '#050807' }}>
+      {/* پس‌زمینه لوگو طلایی — بزرگ و محو */}
       <div
-        className="absolute inset-0 scale-110"
-        style={{
-          backgroundImage: "url('/gym-hero.jpg'), url('/login-bg.svg')",
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat',
-          filter: 'blur(14px) saturate(1.15) brightness(0.75)',
-          transform: 'scale(1.12)',
-        }}
-      />
-      {/* لایه شیشه‌ای نیمه‌شفاف */}
-      <div
-        className="absolute inset-0"
-        style={{
-          background:
-            'linear-gradient(165deg, rgba(5,10,8,0.45) 0%, rgba(8,16,12,0.35) 50%, rgba(5,10,8,0.55) 100%)',
-          backdropFilter: 'blur(2px)',
-          WebkitBackdropFilter: 'blur(2px)',
-        }}
-      />
-      {/* هاله سبز شیشه‌ای */}
+        className="absolute inset-0 flex items-center justify-center pointer-events-none"
+        style={{ opacity: 0.22 }}
+      >
+        <img
+          src="/v4.png"
+          alt=""
+          className="w-[min(92vw,720px)] h-auto object-contain"
+          style={{
+            filter: 'blur(1px) brightness(0.85) saturate(1.1)',
+          }}
+        />
+      </div>
+      {/* گرادیان تیره + هاله طلایی و سبز */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
           background:
-            'radial-gradient(ellipse 55% 40% at 50% 35%, rgba(163,230,53,0.14), transparent 65%)',
+            'radial-gradient(ellipse 70% 55% at 50% 30%, rgba(232,197,71,0.12) 0%, transparent 55%), radial-gradient(ellipse 50% 40% at 50% 70%, rgba(163,230,53,0.08) 0%, transparent 60%), linear-gradient(180deg, rgba(5,8,7,0.55) 0%, rgba(5,8,7,0.85) 55%, rgba(5,8,7,0.95) 100%)',
         }}
       />
 
-      <button
-        type="button"
-        onClick={toggleTheme}
-        className="absolute top-5 left-5 z-20 p-2.5 rounded-xl"
-        style={{
-          background: 'rgba(255,255,255,0.08)',
-          color: 'rgba(255,255,255,0.75)',
-          border: '1px solid rgba(255,255,255,0.12)',
-          backdropFilter: 'blur(12px)',
-        }}
-        title={theme === 'light' ? 'حالت تاریک' : 'حالت روشن'}
-      >
-        {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
-      </button>
-
-      <div className="relative z-10 w-full max-w-[420px] animate-fade-in">
-        <div className="text-center mb-7">
-          {/* لوگو بزرگ */}
-          <div
-            className="mx-auto mb-5 w-[120px] h-[120px] sm:w-[140px] sm:h-[140px] rounded-3xl flex items-center justify-center"
+      <div className="relative z-10 w-full max-w-[400px] animate-fade-in flex flex-col items-center">
+        {/* لوگو طلایی بولد */}
+        <div className="text-center mb-6">
+          <img
+            src="/v4.png"
+            alt="Alpha GYM"
+            className="mx-auto w-[160px] sm:w-[200px] h-auto object-contain drop-shadow-2xl"
             style={{
-              background: 'rgba(8,14,11,0.55)',
-              border: '1px solid rgba(163,230,53,0.4)',
-              boxShadow:
-                '0 0 48px rgba(163,230,53,0.28), 0 12px 40px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(255,255,255,0.06)',
-              backdropFilter: 'blur(16px)',
-              WebkitBackdropFilter: 'blur(16px)',
+              filter: 'drop-shadow(0 0 28px rgba(232,197,71,0.45)) drop-shadow(0 0 48px rgba(163,230,53,0.15))',
             }}
-          >
-            <img
-              src="/v5.png"
-              alt="Alpha GYM"
-              className="w-[88px] h-[88px] sm:w-[100px] sm:h-[100px] object-contain"
-            />
-          </div>
-          <p className="text-white font-black text-base mb-2" style={{ letterSpacing: '0.28em' }}>
-            ALPHA GYM
-          </p>
+          />
           <h1
-            className="text-white font-black leading-tight"
+            className="mt-4 font-black tracking-[0.12em]"
             style={{
-              fontSize: 'clamp(1.75rem, 4.2vw, 2.2rem)',
-              letterSpacing: '-0.02em',
-              textShadow: '0 2px 20px rgba(0,0,0,0.35)',
+              fontSize: 'clamp(1.85rem, 5vw, 2.4rem)',
+              background: 'linear-gradient(180deg, #f5e6a3 0%, #e8c547 40%, #c9a227 75%, #a8841f 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+              textShadow: 'none',
+              filter: 'drop-shadow(0 2px 12px rgba(232,197,71,0.35))',
             }}
           >
-            مدیریت حرفه‌ای باشگاه
+            ALPHA GYM
           </h1>
-          <p className="mt-2 text-sm font-semibold" style={{ color: 'rgba(190,242,100,0.85)' }}>
-            قدرت · نظم · نتیجه
+          <p
+            className="mt-2 text-[10px] sm:text-xs font-semibold tracking-[0.28em] uppercase"
+            style={{ color: 'rgba(163,230,53,0.75)' }}
+          >
+            Smart Gym Management System
           </p>
+          <div className="mt-3 inline-flex items-center gap-2 px-3 py-1 rounded-full text-[11px] font-medium"
+            style={{
+              background: 'rgba(163,230,53,0.1)',
+              border: '1px solid rgba(163,230,53,0.28)',
+              color: '#bef264',
+            }}
+          >
+            <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#a3e635' }} />
+            سیستم آنلاین
+          </div>
         </div>
 
-        {/* کارت فرم شیشه‌ای */}
+        {/* کارت فرم — طلایی + سبز */}
         <div
-          className="rounded-3xl p-7 sm:p-8"
+          className="w-full rounded-2xl p-6 sm:p-7"
           style={{
-            background: 'rgba(12,18,16,0.45)',
-            border: '1px solid rgba(255,255,255,0.12)',
+            background: 'rgba(10,14,12,0.72)',
+            border: '1px solid rgba(232,197,71,0.22)',
             boxShadow:
-              '0 24px 64px rgba(0,0,0,0.4), inset 0 0 0 1px rgba(163,230,53,0.08)',
-            backdropFilter: 'blur(24px) saturate(1.2)',
-            WebkitBackdropFilter: 'blur(24px) saturate(1.2)',
+              '0 20px 56px rgba(0,0,0,0.5), 0 0 40px -12px rgba(232,197,71,0.12), inset 0 0 0 1px rgba(163,230,53,0.06)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
           }}
         >
+          <p className="text-center text-sm font-bold mb-5" style={{ color: 'rgba(245,230,163,0.9)' }}>
+            ورود به پنل مدیریت
+          </p>
+
           {error && (
             <div
               className="mb-4 p-3 rounded-xl text-sm font-medium"
               style={{
-                background: 'rgba(248,113,113,0.15)',
+                background: 'rgba(248,113,113,0.12)',
                 color: '#fca5a5',
-                border: '1px solid rgba(248,113,113,0.28)',
+                border: '1px solid rgba(248,113,113,0.25)',
               }}
             >
               {error}
@@ -138,22 +123,21 @@ export default function Login() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold mb-1.5" style={{ color: 'rgba(255,255,255,0.6)' }}>
+              <label className="block text-xs font-bold mb-1.5" style={{ color: 'rgba(232,197,71,0.7)' }}>
                 نام کاربری
               </label>
               <div className="relative">
                 <User
                   size={16}
                   className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                  style={{ color: 'rgba(255,255,255,0.4)' }}
+                  style={{ color: 'rgba(232,197,71,0.45)' }}
                 />
                 <input
                   type="text"
                   className="w-full rounded-xl py-3 pr-10 pl-4 text-sm text-white outline-none"
                   style={{
-                    background: 'rgba(255,255,255,0.08)',
-                    border: '1px solid rgba(255,255,255,0.14)',
-                    backdropFilter: 'blur(8px)',
+                    background: 'rgba(0,0,0,0.35)',
+                    border: '1px solid rgba(232,197,71,0.2)',
                   }}
                   placeholder="admin"
                   value={username}
@@ -162,10 +146,10 @@ export default function Login() {
                   autoComplete="username"
                   onFocus={(e) => {
                     e.currentTarget.style.borderColor = 'rgba(163,230,53,0.55)';
-                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(163,230,53,0.14)';
+                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(163,230,53,0.12)';
                   }}
                   onBlur={(e) => {
-                    e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)';
+                    e.currentTarget.style.borderColor = 'rgba(232,197,71,0.2)';
                     e.currentTarget.style.boxShadow = 'none';
                   }}
                 />
@@ -173,22 +157,21 @@ export default function Login() {
             </div>
 
             <div>
-              <label className="block text-xs font-bold mb-1.5" style={{ color: 'rgba(255,255,255,0.6)' }}>
+              <label className="block text-xs font-bold mb-1.5" style={{ color: 'rgba(232,197,71,0.7)' }}>
                 رمز عبور
               </label>
               <div className="relative">
                 <Lock
                   size={16}
                   className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                  style={{ color: 'rgba(255,255,255,0.4)' }}
+                  style={{ color: 'rgba(232,197,71,0.45)' }}
                 />
                 <input
                   type={showPassword ? 'text' : 'password'}
                   className="w-full rounded-xl py-3 pr-10 pl-10 text-sm text-white outline-none"
                   style={{
-                    background: 'rgba(255,255,255,0.08)',
-                    border: '1px solid rgba(255,255,255,0.14)',
-                    backdropFilter: 'blur(8px)',
+                    background: 'rgba(0,0,0,0.35)',
+                    border: '1px solid rgba(232,197,71,0.2)',
                   }}
                   placeholder="••••••••"
                   value={password}
@@ -197,10 +180,10 @@ export default function Login() {
                   autoComplete="current-password"
                   onFocus={(e) => {
                     e.currentTarget.style.borderColor = 'rgba(163,230,53,0.55)';
-                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(163,230,53,0.14)';
+                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(163,230,53,0.12)';
                   }}
                   onBlur={(e) => {
-                    e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)';
+                    e.currentTarget.style.borderColor = 'rgba(232,197,71,0.2)';
                     e.currentTarget.style.boxShadow = 'none';
                   }}
                 />
@@ -208,7 +191,7 @@ export default function Login() {
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute left-3.5 top-1/2 -translate-y-1/2 p-0.5"
-                  style={{ color: 'rgba(255,255,255,0.45)' }}
+                  style={{ color: 'rgba(232,197,71,0.5)' }}
                 >
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
@@ -218,12 +201,12 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full mt-2 py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50"
+              className="w-full mt-1 py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50"
               style={{
-                background: 'linear-gradient(135deg, #bef264 0%, #a3e635 45%, #65a30d 100%)',
+                background: 'linear-gradient(135deg, #f0d060 0%, #e8c547 35%, #a3e635 100%)',
                 color: '#0a1208',
-                boxShadow: '0 8px 28px -6px rgba(163,230,53,0.5)',
-                border: '1px solid rgba(220,252,150,0.4)',
+                boxShadow: '0 8px 28px -6px rgba(232,197,71,0.4), 0 0 20px -4px rgba(163,230,53,0.3)',
+                border: '1px solid rgba(245,230,163,0.45)',
               }}
             >
               {loading ? (
@@ -238,8 +221,8 @@ export default function Login() {
           </form>
         </div>
 
-        <p className="text-center text-xs mt-6 font-medium" style={{ color: 'rgba(255,255,255,0.32)' }}>
-          Alpha GYM · Management System
+        <p className="text-center text-[10px] mt-6 font-medium tracking-wider" style={{ color: 'rgba(232,197,71,0.35)' }}>
+          ALPHA GYM · MANAGEMENT SYSTEM
         </p>
       </div>
     </div>
