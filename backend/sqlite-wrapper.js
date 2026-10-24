@@ -23,7 +23,7 @@ try {
     }
 
     get(...params) {
-      const flat = params.length === 1 && Array.isArray(params[0]) ? params[0] : params;
+      const flat = params.length === 1 && Array.isArray(params[0]) ? params[0] : : params;
       const stmt = this.db.prepare(this.sql);
       return stmt.get(...flat.map((v) => (v === undefined ? null : v)));
     }
@@ -52,7 +52,7 @@ try {
       return (...args) => {
         this.db.exec('BEGIN');
         try {
-          const result = fnfn(...args);
+          const result = fn(...args);
           this.db.exec('COMMIT');
           return result;
         } catch (e) {
@@ -60,7 +60,7 @@ try {
           throw e;
         }
       };
-    }
+   }
 
     close() {
       this.db.close();
