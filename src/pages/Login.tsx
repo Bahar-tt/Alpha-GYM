@@ -11,14 +11,14 @@ import { Eye, EyeOff, Lock, User, ArrowLeft } from 'lucide-react';
 function FloatingOrbs() {
   const group = useRef<THREE.Group>(null);
   const orbs = useMemo(() => {
-    return Array.from({ length: 22 }).map((_, i) => ({
+    return Array.from({ length: 20 }).map((_, i) => ({
       position: [
-        (Math.random() - 0.2) * 9,
+        (Math.random() - 0.15) * 10,
         (Math.random() - 0.5) * 7,
         (Math.random() - 0.5) * 5 - 1,
       ] as [number, number, number],
-      scale: 0.035 + Math.random() * 0.11,
-      speed: 0.25 + Math.random() * 0.7,
+      scale: 0.03 + Math.random() * 0.1,
+      speed: 0.2 + Math.random() * 0.6,
       color: i % 3 === 0 ? '#39ff14' : '#ff6b00',
     }));
   }, []);
@@ -27,8 +27,8 @@ function FloatingOrbs() {
     if (!group.current) return;
     group.current.children.forEach((child, i) => {
       const t = state.clock.elapsedTime * orbs[i].speed;
-      child.position.y = orbs[i].position[1] + Math.sin(t + i) * 0.4;
-      child.position.x = orbs[i].position[0] + Math.cos(t * 0.6 + i) * 0.2;
+      child.position.y = orbs[i].position[1] + Math.sin(t + i) * 0.35;
+      child.position.x = orbs[i].position[0] + Math.cos(t * 0.5 + i) * 0.18;
     });
   });
 
@@ -40,9 +40,9 @@ function FloatingOrbs() {
           <meshStandardMaterial
             color={orb.color}
             emissive={orb.color}
-            emissiveIntensity={2.8}
+            emissiveIntensity={2.6}
             transparent
-            opacity={0.9}
+            opacity={0.85}
           />
         </mesh>
       ))}
@@ -61,21 +61,19 @@ function HeroPlane() {
 
   useFrame((state) => {
     if (!mesh.current) return;
-    const x = state.pointer.x * 0.12;
-    const y = state.pointer.y * 0.06;
+    const x = state.pointer.x * 0.1;
+    const y = state.pointer.y * 0.05;
     mesh.current.rotation.y = THREE.MathUtils.lerp(mesh.current.rotation.y, x, 0.04);
     mesh.current.rotation.x = THREE.MathUtils.lerp(mesh.current.rotation.x, -y, 0.04);
   });
 
   return (
-    <Float speed={1.1} rotationIntensity={0.12} floatIntensity={0.35}>
-      <mesh ref={mesh} position={[2.4, 0.15, -0.8]} scale={[5.2, 6.8, 1]}>
-        <planeGeometry args={[1, 1, 24, 24]} />
-        <MeshDistortMaterial
+    <Float speed={1} rotationIntensity={0.1} floatIntensity={0.3}>
+      <mesh ref={mesh} position={[2.6, 0.2, -0.6]} scale={[5.8, 7.4, 1]}>
+        <planeGeometry args={[1, 1, 16, 16]} />
+        <meshStandardMaterial
           map={texture}
-          distort={0.06}
-          speed={1.2}
-          roughness={0.3}
+          roughness={0.4}
           metalness={0.05}
           transparent
           opacity={1}
@@ -85,43 +83,20 @@ function HeroPlane() {
   );
 }
 
-function GlowRing() {
-  const ref = useRef<THREE.Mesh>(null);
-  useFrame((state) => {
-    if (!ref.current) return;
-    ref.current.rotation.z = state.clock.elapsedTime * 0.2;
-    ref.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.35) * 0.12;
-  });
-
-  return (
-    <mesh ref={ref} position={[2.3, 0.1, -1.5]}>
-      <torusGeometry args={[1.9, 0.025, 16, 100]} />
-      <meshStandardMaterial
-        color="#ff6b00"
-        emissive="#ff6b00"
-        emissiveIntensity={3.5}
-        transparent
-        opacity={0.7}
-      />
-    </mesh>
-  );
-}
-
 function Scene() {
   return (
     <>
       <color attach="background" args={['#020202']} />
-      <fog attach="fog" args={['#020202', 7, 18]} />
+      <fog attach="fog" args={['#020202', 8, 20]} />
 
-      <ambientLight intensity={0.3} />
-      <pointLight position={[5, 4, 3]} intensity={2.2} color="#ff6b00" distance={14} />
-      <pointLight position={[-4, -2, 2]} intensity={1.4} color="#39ff14" distance={12} />
-      <spotLight position={[1, 7, 5]} angle={0.45} penumbra={0.9} intensity={1.6} color="#ffffff" />
+      <ambientLight intensity={0.45} />
+      <pointLight position={[6, 3, 4]} intensity={2.5} color="#ff6b00" distance={16} />
+      <pointLight position={[-3, 1, 3]} intensity={1.2} color="#39ff14" distance={12} />
+      <spotLight position={[3, 6, 5]} angle={0.5} penumbra={0.8} intensity={2} color="#ffffff" />
 
-      <Stars radius={50} depth={40} count={1800} factor={3.5} saturation={0} fade speed={0.5} />
+      <Stars radius={60} depth={40} count={1600} factor={3} saturation={0} fade speed={0.4} />
       <FloatingOrbs />
       <HeroPlane />
-      <GlowRing />
     </>
   );
 }
@@ -149,8 +124,8 @@ export default function Login() {
     const centerX = rect.width / 2;
     const centerY = rect.height / 2;
     setTilt({
-      x: ((y - centerY) / centerY) * -12,
-      y: ((x - centerX) / centerX) * 12,
+      x: ((y - centerY) / centerY) * -10,
+      y: ((x - centerX) / centerX) * 10,
     });
   };
 
@@ -172,11 +147,11 @@ export default function Login() {
 
   return (
     <div className="min-h-screen relative overflow-hidden bg-[#020202]">
-      {/* 3D Canvas */}
+      {/* Fullscreen 3D */}
       <div className="absolute inset-0 z-0">
         <Canvas
-          camera={{ position: [0, 0, 6.2], fov: 42 }}
-          dpr={[1, 1.6]}
+          camera={{ position: [0, 0, 6], fov: 40 }}
+          dpr={[1, 1.5]}
           gl={{ antialias: true, alpha: false }}
         >
           <Suspense fallback={null}>
@@ -185,209 +160,231 @@ export default function Login() {
         </Canvas>
       </div>
 
-      {/* Soft dark gradient only on left for form readability */}
+      {/* Dark veil only on LEFT so woman stays bright on right */}
       <div
         className="absolute inset-0 z-[1] pointer-events-none"
         style={{
           background: `linear-gradient(90deg,
-            rgba(2,2,2,0.88) 0%,
-            rgba(2,2,2,0.55) 28%,
-            rgba(2,2,2,0.15) 50%,
-            transparent 70%
+            rgba(2,2,2,0.92) 0%,
+            rgba(2,2,2,0.7) 22%,
+            rgba(2,2,2,0.25) 42%,
+            transparent 58%
           )`,
         }}
       />
 
-      {/* UI */}
-      <div className="relative z-10 min-h-screen flex items-center">
-        <div className="w-full max-w-[1400px] mx-auto px-5 sm:px-10 py-8 grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
-          
-          {/* FORM – forced to visual left */}
-          <div className="w-full max-w-[390px] justify-self-start order-2 lg:order-1" dir="rtl">
-            {/* Logo */}
-            <div className="mb-7 text-center lg:text-right">
-              <img
-                src="/v5.png"
-                alt="Alpha GYM"
-                className="mx-auto lg:mr-0 lg:ml-auto w-[125px] sm:w-[145px] h-auto"
-                style={{
-                  filter: 'drop-shadow(0 0 16px rgba(255,107,0,0.7)) drop-shadow(0 0 28px rgba(57,255,20,0.25))',
-                }}
-              />
-              <h1
-                className="mt-3 font-black tracking-[0.12em]"
-                style={{
-                  fontSize: 'clamp(1.65rem, 4vw, 2.15rem)',
-                  background: `linear-gradient(180deg, #fff 0%, ${orangeBright} 42%, ${orange} 85%)`,
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                  filter: 'drop-shadow(0 2px 10px rgba(255,107,0,0.4))',
-                }}
-              >
-                ALPHA GYM
-              </h1>
-              <p
-                className="mt-1 text-[11px] font-bold tracking-[0.26em] uppercase"
-                style={{ color: neonGreen, textShadow: '0 0 10px rgba(57,255,20,0.4)' }}
-              >
-                Management System
-              </p>
-            </div>
-
-            {/* Card */}
-            <div
-              ref={cardRef}
-              onMouseMove={handleMouseMove}
-              onMouseLeave={handleMouseLeave}
-              style={{ perspective: '1100px' }}
+      {/* ========== FORM – absolute LEFT ========== */}
+      <div
+        className="absolute z-20 top-0 bottom-0 left-0 w-full max-w-[420px] flex items-center"
+        style={{ padding: '24px 20px' }}
+      >
+        <div className="w-full" dir="rtl">
+          {/* Logo + Title */}
+          <div className="mb-6 text-center">
+            <img
+              src="/v5.png"
+              alt="Alpha GYM"
+              className="mx-auto w-[120px] sm:w-[140px] h-auto"
+              style={{
+                filter: 'drop-shadow(0 0 16px rgba(255,107,0,0.7)) drop-shadow(0 0 26px rgba(57,255,20,0.25))',
+              }}
+            />
+            <h1
+              className="mt-3 font-black tracking-[0.14em]"
+              style={{
+                fontSize: 'clamp(1.6rem, 4vw, 2.1rem)',
+                background: `linear-gradient(180deg, #ffffff 0%, ${orangeBright} 45%, ${orange} 100%)`,
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                filter: 'drop-shadow(0 2px 8px rgba(255,107,0,0.4))',
+              }}
             >
-              <div
-                className="rounded-2xl p-6 sm:p-7 relative transition-transform duration-150 ease-out"
-                style={{
-                  background: 'linear-gradient(160deg, rgba(12,12,12,0.94) 0%, rgba(5,5,5,0.97) 100%)',
-                  border: '1px solid rgba(255,107,0,0.42)',
-                  boxShadow: `
-                    0 0 0 1px rgba(57,255,20,0.1),
-                    0 22px 45px -10px rgba(0,0,0,0.9),
-                    0 0 50px -10px rgba(255,107,0,0.3),
-                    0 0 35px -6px rgba(57,255,20,0.12),
-                    inset 0 1px 0 rgba(255,255,255,0.05)
-                  `,
-                  transform: `rotateX(${tilt.x}deg) rotateY(${tilt.y}deg) translateZ(16px)`,
-                  backdropFilter: 'blur(14px)',
-                }}
-              >
-                <div
-                  className="absolute top-0 right-7 left-7 h-[2px] rounded-b-full"
-                  style={{
-                    background: `linear-gradient(90deg, transparent, ${orange}, ${neonGreen}, transparent)`,
-                    boxShadow: `0 0 10px ${orange}`,
-                  }}
-                />
-
-                <p className="text-center text-sm font-bold mb-5" style={{ color: '#ffd9b0' }}>
-                  ورود به پنل مدیریت
-                </p>
-
-                {error && (
-                  <div
-                    className="mb-4 p-3 rounded-xl text-sm"
-                    style={{ background: 'rgba(248,113,113,0.12)', color: '#fca5a5', border: '1px solid rgba(248,113,113,0.3)' }}
-                  >
-                    {error}
-                  </div>
-                )}
-
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold mb-1.5" style={{ color: 'rgba(255,140,51,0.9)' }}>
-                      نام کاربری
-                    </label>
-                    <div className="relative">
-                      <User size={15} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'rgba(255,107,0,0.55)' }} />
-                      <input
-                        type="text"
-                        className="w-full rounded-xl py-3 pr-9 pl-3 text-sm outline-none"
-                        style={{
-                          background: 'rgba(0,0,0,0.7)',
-                          border: '1px solid rgba(255,107,0,0.32)',
-                          color: '#eee',
-                          boxShadow: 'inset 0 2px 5px rgba(0,0,0,0.5)',
-                        }}
-                        placeholder="admin"
-                        value={username}
-                        onChange={(e) => setUsername(e.target.value)}
-                        required
-                        onFocus={(e) => {
-                          e.currentTarget.style.borderColor = neonGreen;
-                          e.currentTarget.style.boxShadow = '0 0 0 2px rgba(57,255,20,0.2), inset 0 2px 5px rgba(0,0,0,0.5)';
-                        }}
-                        onBlur={(e) => {
-                          e.currentTarget.style.borderColor = 'rgba(255,107,0,0.32)';
-                          e.currentTarget.style.boxShadow = 'inset 0 2px 5px rgba(0,0,0,0.5)';
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold mb-1.5" style={{ color: 'rgba(255,140,51,0.9)' }}>
-                      رمز عبور
-                    </label>
-                    <div className="relative">
-                      <Lock size={15} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'rgba(255,107,0,0.55)' }} />
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        className="w-full rounded-xl py-3 pr-9 pl-9 text-sm outline-none"
-                        style={{
-                          background: 'rgba(0,0,0,0.7)',
-                          border: '1px solid rgba(255,107,0,0.32)',
-                          color: '#eee',
-                          boxShadow: 'inset 0 2px 5px rgba(0,0,0,0.5)',
-                        }}
-                        placeholder="••••••••"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        required
-                        onFocus={(e) => {
-                          e.currentTarget.style.borderColor = neonGreen;
-                          e.currentTarget.style.boxShadow = '0 0 0 2px rgba(57,255,20,0.2), inset 0 2px 5px rgba(0,0,0,0.5)';
-                        }}
-                        onBlur={(e) => {
-                          e.currentTarget.style.borderColor = 'rgba(255,107,0,0.32)';
-                          e.currentTarget.style.boxShadow = 'inset 0 2px 5px rgba(0,0,0,0.5)';
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute left-3 top-1/2 -translate-y-1/2"
-                        style={{ color: 'rgba(255,107,0,0.6)' }}
-                      >
-                        {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
-                      </button>
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="w-full mt-1 py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.97] disabled:opacity-55"
-                    style={{
-                      background: `linear-gradient(145deg, ${orangeBright}, ${orange} 50%, #e05a00)`,
-                      color: '#0a0a0a',
-                      border: '1px solid rgba(255,200,120,0.4)',
-                      boxShadow: `
-                        0 1px 0 rgba(255,255,255,0.25) inset,
-                        0 5px 0 #b34a00,
-                        0 12px 24px -3px rgba(255,107,0,0.5),
-                        0 0 20px -2px rgba(57,255,20,0.25)
-                      `,
-                    }}
-                  >
-                    {loading ? (
-                      <span className="flex items-center gap-2">
-                        <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
-                        در حال ورود...
-                      </span>
-                    ) : (
-                      <>
-                        ورود به سیستم
-                        <ArrowLeft size={16} strokeWidth={2.5} />
-                      </>
-                    )}
-                  </button>
-                </form>
-              </div>
-            </div>
-
-            <p className="text-[10px] mt-6 font-semibold tracking-[0.22em] text-white/20 text-center lg:text-right">
-              ALPHA GYM · POWERED BY STRENGTH
+              ALPHA GYM
+            </h1>
+            <p
+              className="mt-1 text-[11px] font-bold tracking-[0.28em] uppercase"
+              style={{ color: neonGreen, textShadow: '0 0 10px rgba(57,255,20,0.45)' }}
+            >
+              Management System
             </p>
           </div>
 
-          {/* Right side empty – 3D scene lives here */}
-          <div className="hidden lg:block order-1 lg:order-2" />
+          {/* Card */}
+          <div
+            ref={cardRef}
+            onMouseMove={handleMouseMove}
+            onMouseLeave={handleMouseLeave}
+            style={{ perspective: '1000px' }}
+          >
+            <div
+              className="rounded-2xl p-6 relative transition-transform duration-150 ease-out"
+              style={{
+                background: 'linear-gradient(165deg, rgba(12,12,12,0.95) 0%, rgba(5,5,5,0.98) 100%)',
+                border: '1px solid rgba(255,107,0,0.4)',
+                boxShadow: `
+                  0 0 0 1px rgba(57,255,20,0.1),
+                  0 20px 40px -8px rgba(0,0,0,0.9),
+                  0 0 45px -8px rgba(255,107,0,0.28),
+                  inset 0 1px 0 rgba(255,255,255,0.05)
+                `,
+                transform: `rotateX(${tilt.x}deg) rotateY(${tilt.y}deg) translateZ(12px)`,
+                backdropFilter: 'blur(12px)',
+              }}
+            >
+              {/* top line */}
+              <div
+                className="absolute top-0 right-6 left-6 h-[2px] rounded-b-full"
+                style={{
+                  background: `linear-gradient(90deg, transparent, ${orange}, ${neonGreen}, transparent)`,
+                  boxShadow: `0 0 8px ${orange}`,
+                }}
+              />
+
+              <p
+                className="text-center text-[13px] font-bold mb-5"
+                style={{ color: '#ffd4a8', letterSpacing: '0.02em' }}
+              >
+                ورود به پنل مدیریت
+              </p>
+
+              {error && (
+                <div
+                  className="mb-4 p-3 rounded-xl text-sm"
+                  style={{
+                    background: 'rgba(248,113,113,0.12)',
+                    color: '#fca5a5',
+                    border: '1px solid rgba(248,113,113,0.3)',
+                  }}
+                >
+                  {error}
+                </div>
+              )}
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {/* Username */}
+                <div>
+                  <label
+                    className="block text-[11px] font-bold mb-1.5"
+                    style={{ color: 'rgba(255,140,51,0.9)' }}
+                  >
+                    نام کاربری
+                  </label>
+                  <div className="relative">
+                    <User
+                      size={15}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                      style={{ color: 'rgba(255,107,0,0.55)' }}
+                    />
+                    <input
+                      type="text"
+                      className="w-full rounded-xl py-3 pr-9 pl-3 text-sm outline-none"
+                      style={{
+                        background: 'rgba(0,0,0,0.75)',
+                        border: '1px solid rgba(255,107,0,0.3)',
+                        color: '#f0f0f0',
+                        boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.5)',
+                      }}
+                      placeholder="admin"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      required
+                      onFocus={(e) => {
+                        e.currentTarget.style.borderColor = neonGreen;
+                        e.currentTarget.style.boxShadow =
+                          '0 0 0 2px rgba(57,255,20,0.18), inset 0 2px 4px rgba(0,0,0,0.5)';
+                      }}
+                      onBlur={(e) => {
+                        e.currentTarget.style.borderColor = 'rgba(255,107,0,0.3)';
+                        e.currentTarget.style.boxShadow = 'inset 0 2px 4px rgba(0,0,0,0.5)';
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Password */}
+                <div>
+                  <label
+                    className="block text-[11px] font-bold mb-1.5"
+                    style={{ color: 'rgba(255,140,51,0.9)' }}
+                  >
+                    رمز عبور
+                  </label>
+                  <div className="relative">
+                    <Lock
+                      size={15}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                      style={{ color: 'rgba(255,107,0,0.55)' }}
+                    />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      className="w-full rounded-xl py-3 pr-9 pl-9 text-sm outline-none"
+                      style={{
+                        background: 'rgba(0,0,0,0.75)',
+                        border: '1px solid rgba(255,107,0,0.3)',
+                        color: '#f0f0f0',
+                        boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.5)',
+                      }}
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                      onFocus={(e) => {
+                        e.currentTarget.style.borderColor = neonGreen;
+                        e.currentTarget.style.boxShadow =
+                          '0 0 0 2px rgba(57,255,20,0.18), inset 0 2px 4px rgba(0,0,0,0.5)';
+                      }}
+                      onBlur={(e) => {
+                        e.currentTarget.style.borderColor = 'rgba(255,107,0,0.3)';
+                        e.currentTarget.style.boxShadow = 'inset 0 2px 4px rgba(0,0,0,0.5)';
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute left-3 top-1/2 -translate-y-1/2"
+                      style={{ color: 'rgba(255,107,0,0.6)' }}
+                    >
+                      {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Button */}
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full mt-1 py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.97] disabled:opacity-55"
+                  style={{
+                    background: `linear-gradient(145deg, ${orangeBright}, ${orange} 55%, #e05a00)`,
+                    color: '#0a0a0a',
+                    border: '1px solid rgba(255,200,120,0.4)',
+                    boxShadow: `
+                      0 1px 0 rgba(255,255,255,0.25) inset,
+                      0 5px 0 #b34a00,
+                      0 12px 22px -3px rgba(255,107,0,0.5),
+                      0 0 18px -2px rgba(57,255,20,0.22)
+                    `,
+                  }}
+                >
+                  {loading ? (
+                    <span className="flex items-center gap-2">
+                      <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+                      در حال ورود...
+                    </span>
+                  ) : (
+                    <>
+                      ورود به سیستم
+                      <ArrowLeft size={16} strokeWidth={2.5} />
+                    </>
+                  )}
+                </button>
+              </form>
+            </div>
+          </div>
+
+          <p className="text-[10px] mt-5 font-semibold tracking-[0.22em] text-white/20 text-center">
+            ALPHA GYM · POWERED BY STRENGTH
+          </p>
         </div>
       </div>
     </div>
