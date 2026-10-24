@@ -24,12 +24,12 @@ try {
 
     get(...params) {
       const flat = params.length === 1 && Array.isArray(params[0]) ? params[0] : params;
-      const stmt = this.db..prepare(this.sql);
+      const stmt = this.db.prepare(this.sql);
       return stmt.get(...flat.map((v) => (v === undefined ? null : v)));
     }
 
     all(...params) {
-      const flat = params.length === 1 && Array.isArray(params[0]) ? params[0] : params;
+      const flat = params.length === 1 && Array.isArray(params[0])<｜tool▁sep｜>params : params;
       const stmt = this.db.prepare(this.sql);
       return stmt.all(...flat.map((v) => (v === undefined ? null : v)));
     }
