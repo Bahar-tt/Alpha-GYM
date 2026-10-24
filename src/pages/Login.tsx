@@ -42,9 +42,9 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen grid grid-cols-1 lg:grid-cols-5 bg-[#0a0a0a] overflow-hidden">
-      {/* ========== FORM – LEFT (cols 1-2) ========== */}
-      <div className="lg:col-span-2 flex flex-col justify-center px-8 sm:px-10 lg:px-12 xl:px-14 relative order-2 lg:order-1">
+    <div dir="ltr" className="min-h-screen flex bg-[#0a0a0a] overflow-hidden">
+      {/* LEFT – Form */}
+      <div className="w-full lg:w-[40%] flex flex-col justify-center px-8 sm:px-12 lg:px-14 relative z-10">
         <div className="absolute inset-0 bg-[#0c0c0c]" />
 
         <div className="relative z-10 w-full max-w-[340px] mx-auto" dir="rtl">
@@ -53,7 +53,7 @@ export default function Login() {
             <img
               src="/v5.png"
               alt="Alpha GYM"
-              className="mx-auto w-[140px] sm:w-[160px] h-auto"
+              className="mx-auto w-[145px] sm:w-[165px] h-auto"
               style={{
                 filter: 'drop-shadow(0 0 14px rgba(245,197,24,0.5)) drop-shadow(0 4px 12px rgba(0,0,0,0.5))',
               }}
@@ -162,19 +162,18 @@ export default function Login() {
         </div>
       </div>
 
-      {/* ========== HERO – RIGHT (cols 3-5) ========== */}
-      <div className="hidden lg:block lg:col-span-3 relative order-1 lg:order-2">
+      {/* RIGHT – Hero */}
+      <div className="hidden lg:block lg:w-[60%] relative">
         <img
           src="/hero-woman.jpg"
           alt=""
-          className="absolute inset-0 w-full h-full object-cover object-[center_20%]"
-          style={{ filter: 'brightness(0.9) contrast(1.05)' }}
+          className="absolute inset-0 w-full h-full object-cover object-[center_15%]"
+          style={{ filter: 'brightness(0.92) contrast(1.05)' }}
         />
-        {/* soft left blend */}
         <div
           className="absolute inset-0"
           style={{
-            background: 'linear-gradient(90deg, rgba(10,10,10,0.55) 0%, transparent 30%)',
+            background: 'linear-gradient(90deg, rgba(10,10,10,0.5) 0%, transparent 28%)',
           }}
         />
       </div>
