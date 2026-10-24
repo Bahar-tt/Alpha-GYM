@@ -1,20 +1,37 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useTheme } from '../context/ThemeContext';
 import { useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Lock, User, ArrowLeft, Sun, Moon } from 'lucide-react';
+import { Eye, EyeOff, Lock, User, ArrowLeft } from 'lucide-react';
 
 export default function Login() {
   const { signIn } = useAuth();
-  const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
-  const isDark = theme === 'dark';
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // 3D tilt state
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [tilt, setTilt] = useState({ x: 0, y: 0 });
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!cardRef.current) return;
+    const rect = cardRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    const rotateX = ((y - centerY) / centerY) * -12;
+    const rotateY = ((x - centerX) / centerX) * 12;
+    setTilt({ x: rotateX, y: rotateY });
+  };
+
+  const handleMouseLeave = () => {
+    setTilt({ x: 0, y: 0 });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,301 +43,329 @@ export default function Login() {
     setLoading(false);
   };
 
-  const pageBg = isDark ? '#070a09' : '#eef2ec';
-  const textMain = isDark ? '#f5f5f0' : '#0c1410';
-  const textMuted = isDark ? 'rgba(255,255,255,0.45)' : 'rgba(12,20,16,0.5)';
-  const gold = isDark ? '#e8c547' : '#a8841f';
-  const green = isDark ? '#a3e635' : '#65a30d';
+  // Colors – Black + Orange + Neon Green
+  const orange = '#ff6b00';
+  const orangeBright = '#ff8c33';
+  const neonGreen = '#39ff14';
+  const neonGreenSoft = 'rgba(57, 255, 20, 0.35)';
 
   return (
     <div
       dir="rtl"
-      className="min-h-screen relative flex flex-col items-center justify-center px-4 py-10 overflow-hidden transition-colors duration-300"
-      style={{ background: pageBg }}
+      className="min-h-screen relative flex items-center justify-center overflow-hidden"
+      style={{
+        background: '#050505',
+      }}
     >
-      {/* لوگوی پس‌زمینه — خیلی محو و تمیز */}
-      <div
-        className="absolute inset-0 flex items-center justify-center pointer-events-none"
-        style={{ opacity: isDark ? 0.06 : 0.05 }}
-      >
+      {/* ========== HERO BACKGROUND (Woman) ========== */}
+      <div className="absolute inset-0 z-0">
         <img
-          src="/v4.png"
+          src="/hero-woman.jpg"
           alt=""
-          className="w-[min(85vw,640px)] h-auto object-contain select-none"
-          style={{ filter: 'blur(8px) saturate(0.85)' }}
+          className="w-full h-full object-cover object-center scale-105"
+          style={{
+            filter: 'brightness(0.45) contrast(1.15) saturate(1.1)',
+          }}
+          onError={(e) => {
+            (e.target as HTMLImageElement).style.display = 'none';
+          }}
+        />
+        {/* Dark cinematic overlays */}
+        <div
+          className="absolute inset-0"
+          style={{
+            background: `
+              linear-gradient(90deg, rgba(5,5,5,0.92) 0%, rgba(5,5,5,0.55) 45%, rgba(5,5,5,0.75) 100%),
+              linear-gradient(180deg, rgba(5,5,5,0.3) 0%, transparent 40%, rgba(5,5,5,0.85) 100%),
+              radial-gradient(ellipse 80% 60% at 70% 40%, rgba(255,107,0,0.12), transparent 60%)
+            `,
+          }}
+        />
+        {/* Neon green accent glow bottom-left */}
+        <div
+          className="absolute bottom-0 left-0 w-[60%] h-[50%] pointer-events-none"
+          style={{
+            background: 'radial-gradient(ellipse at 20% 80%, rgba(57,255,20,0.08), transparent 55%)',
+          }}
         />
       </div>
 
-      {/* هاله‌های خیلی ملایم */}
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          background: isDark
-            ? 'radial-gradient(ellipse 55% 40% at 50% 25%, rgba(232,197,71,0.06), transparent 60%)'
-            : 'radial-gradient(ellipse 55% 40% at 50% 25%, rgba(201,162,39,0.08), transparent 60%)',
-        }}
-      />
+      {/* ========== FLOATING PARTICLES (CSS) ========== */}
+      <div className="absolute inset-0 z-[1] pointer-events-none overflow-hidden">
+        {[...Array(12)].map((_, i) => (
+          <div
+            key={i}
+            className="absolute rounded-full"
+            style={{
+              width: `${4 + (i % 4) * 3}px`,
+              height: `${4 + (i % 4) * 3}px`,
+              background: i % 3 === 0 ? neonGreen : orange,
+              opacity: 0.25 + (i % 5) * 0.08,
+              left: `${8 + i * 7.5}%`,
+              top: `${12 + (i * 13) % 70}%`,
+              boxShadow: `0 0 ${10 + i * 2}px ${i % 3 === 0 ? neonGreenSoft : 'rgba(255,107,0,0.4)'}`,
+              animation: `floatParticle ${6 + (i % 5)}s ease-in-out infinite`,
+              animationDelay: `${i * 0.4}s`,
+            }}
+          />
+        ))}
+      </div>
 
-      {/* دکمه روز / شب */}
-      <button
-        type="button"
-        onClick={toggleTheme}
-        className="absolute top-5 left-5 z-20 p-2.5 rounded-xl transition-all"
-        style={{
-          background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)',
-          color: isDark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.55)',
-          border: isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.08)',
-          boxShadow: isDark
-            ? '0 4px 16px rgba(0,0,0,0.35)'
-            : '0 4px 16px rgba(0,0,0,0.08)',
-        }}
-        title={isDark ? 'حالت روز' : 'حالت شب'}
-      >
-        {isDark ? <Sun size={18} /> : <Moon size={18} />}
-      </button>
-
-      <div className="relative z-10 w-full max-w-[400px] animate-fade-in flex flex-col items-center">
-        {/* لوگو واضح در بالا */}
-        <div className="text-center mb-7">
+      {/* ========== MAIN CONTENT ========== */}
+      <div className="relative z-10 w-full max-w-[440px] px-4 py-10 flex flex-col items-center">
+        {/* Logo */}
+        <div className="text-center mb-8 animate-fade-in">
           <img
             src="/v4.png"
             alt="Alpha GYM"
-            className="mx-auto w-[140px] sm:w-[170px] h-auto object-contain"
+            className="mx-auto w-[150px] sm:w-[180px] h-auto object-contain"
             style={{
-              filter: isDark
-                ? 'drop-shadow(0 8px 28px rgba(232,197,71,0.35)) drop-shadow(0 0 40px rgba(163,230,53,0.12))'
-                : 'drop-shadow(0 8px 24px rgba(168,132,31,0.25))',
+              filter: `
+                drop-shadow(0 0 20px rgba(255,107,0,0.55))
+                drop-shadow(0 0 40px rgba(57,255,20,0.25))
+                drop-shadow(0 12px 30px rgba(0,0,0,0.6))
+              `,
             }}
           />
           <h1
-            className="mt-4 font-black tracking-[0.14em]"
+            className="mt-5 font-black tracking-[0.18em]"
             style={{
-              fontSize: 'clamp(1.7rem, 4.5vw, 2.15rem)',
-              background: isDark
-                ? 'linear-gradient(180deg, #f5e6a3 0%, #e8c547 45%, #c9a227 100%)'
-                : 'linear-gradient(180deg, #c9a227 0%, #a8841f 55%, #7a6418 100%)',
+              fontSize: 'clamp(1.85rem, 5vw, 2.4rem)',
+              background: `linear-gradient(180deg, #fff 0%, ${orangeBright} 40%, ${orange} 75%, #cc5500 100%)`,
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
               backgroundClip: 'text',
-              filter: 'drop-shadow(0 2px 10px rgba(232,197,71,0.25))',
+              filter: 'drop-shadow(0 4px 16px rgba(255,107,0,0.45))',
             }}
           >
             ALPHA GYM
           </h1>
           <p
-            className="mt-2 text-[10px] sm:text-xs font-semibold tracking-[0.26em] uppercase"
-            style={{ color: isDark ? 'rgba(163,230,53,0.7)' : 'rgba(101,163,13,0.8)' }}
+            className="mt-2 text-[11px] sm:text-xs font-bold tracking-[0.32em] uppercase"
+            style={{ color: neonGreen, textShadow: `0 0 12px ${neonGreenSoft}` }}
           >
-            Smart Gym Management System
+            Management System
           </p>
         </div>
 
-        {/* کارت فرم سه‌بعدی قوی */}
+        {/* ========== 3D CARD ========== */}
         <div
-          className="w-full rounded-[1.35rem] p-6 sm:p-8 relative"
+          ref={cardRef}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={handleMouseLeave}
+          className="w-full relative transition-transform duration-200 ease-out"
           style={{
-            background: isDark
-              ? 'linear-gradient(160deg, rgba(22,28,24,0.95) 0%, rgba(12,16,14,0.98) 100%)'
-              : 'linear-gradient(160deg, #ffffff 0%, #f4f7f2 100%)',
-            border: isDark
-              ? '1px solid rgba(232,197,71,0.28)'
-              : '1px solid rgba(201,162,39,0.25)',
-            boxShadow: isDark
-              ? `
-                0 2px 0 0 rgba(232,197,71,0.15),
-                0 12px 0 -2px rgba(0,0,0,0.35),
-                0 28px 56px -8px rgba(0,0,0,0.65),
-                0 0 48px -16px rgba(232,197,71,0.12),
-                inset 0 1px 0 0 rgba(255,255,255,0.06)
-              `
-              : `
-                0 2px 0 0 rgba(201,162,39,0.12),
-                0 10px 0 -2px rgba(0,0,0,0.04),
-                0 24px 48px -12px rgba(0,0,0,0.18),
-                0 0 32px -12px rgba(163,230,53,0.1),
-                inset 0 1px 0 0 rgba(255,255,255,0.9)
-              `,
-            transform: 'translateY(-2px)',
+            perspective: '1200px',
+            transformStyle: 'preserve-3d',
           }}
         >
-          {/* نوار طلایی بالای کارت */}
           <div
-            className="absolute top-0 right-8 left-8 h-[3px] rounded-b-full"
+            className="w-full rounded-2xl p-7 sm:p-9 relative"
             style={{
-              background: isDark
-                ? 'linear-gradient(90deg, transparent, #e8c547 30%, #a3e635 70%, transparent)'
-                : 'linear-gradient(90deg, transparent, #c9a227 30%, #65a30d 70%, transparent)',
-              opacity: 0.85,
+              background: 'linear-gradient(165deg, rgba(18,18,18,0.92) 0%, rgba(10,10,10,0.97) 100%)',
+              border: `1px solid rgba(255,107,0,0.35)`,
+              boxShadow: `
+                0 0 0 1px rgba(57,255,20,0.08),
+                0 2px 0 0 rgba(255,107,0,0.2),
+                0 25px 50px -12px rgba(0,0,0,0.85),
+                0 0 60px -15px rgba(255,107,0,0.25),
+                0 0 40px -10px rgba(57,255,20,0.12),
+                inset 0 1px 0 0 rgba(255,255,255,0.06)
+              `,
+              transform: `rotateX(${tilt.x}deg) rotateY(${tilt.y}deg) translateZ(20px)`,
+              transformStyle: 'preserve-3d',
+              backdropFilter: 'blur(20px)',
             }}
-          />
-
-          <p
-            className="text-center text-sm font-bold mb-5 tracking-wide"
-            style={{ color: isDark ? 'rgba(245,230,163,0.92)' : '#7a6418' }}
           >
-            ورود به پنل مدیریت
-          </p>
-
-          {error && (
+            {/* Top neon line */}
             <div
-              className="mb-4 p-3 rounded-xl text-sm font-medium"
+              className="absolute top-0 right-10 left-10 h-[3px] rounded-b-full"
               style={{
-                background: 'rgba(248,113,113,0.12)',
-                color: isDark ? '#fca5a5' : '#dc2626',
-                border: '1px solid rgba(248,113,113,0.25)',
+                background: `linear-gradient(90deg, transparent, ${orange} 25%, ${neonGreen} 75%, transparent)`,
+                opacity: 0.9,
+                boxShadow: `0 0 12px ${orange}, 0 0 8px ${neonGreen}`,
+              }}
+            />
+
+            {/* Side glow accents */}
+            <div
+              className="absolute -left-1 top-1/4 bottom-1/4 w-[3px] rounded-full"
+              style={{
+                background: `linear-gradient(180deg, transparent, ${orange}, transparent)`,
+                opacity: 0.6,
+                boxShadow: `0 0 15px ${orange}`,
+              }}
+            />
+
+            <p
+              className="text-center text-sm font-bold mb-6 tracking-wide"
+              style={{
+                color: '#ffd4a8',
+                textShadow: '0 0 20px rgba(255,107,0,0.3)',
               }}
             >
-              {error}
-            </div>
-          )}
+              ورود به پنل مدیریت
+            </p>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label
-                className="block text-xs font-bold mb-1.5"
-                style={{ color: isDark ? 'rgba(232,197,71,0.75)' : 'rgba(122,100,24,0.85)' }}
+            {error && (
+              <div
+                className="mb-5 p-3.5 rounded-xl text-sm font-medium"
+                style={{
+                  background: 'rgba(248,113,113,0.12)',
+                  color: '#fca5a5',
+                  border: '1px solid rgba(248,113,113,0.3)',
+                }}
               >
-                نام کاربری
-              </label>
-              <div className="relative">
-                <User
-                  size={16}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                  style={{ color: isDark ? 'rgba(232,197,71,0.4)' : 'rgba(168,132,31,0.5)' }}
-                />
-                <input
-                  type="text"
-                  className="w-full rounded-xl py-3.5 pr-10 pl-4 text-sm outline-none transition-shadow"
-                  style={{
-                    background: isDark ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.95)',
-                    border: isDark
-                      ? '1px solid rgba(232,197,71,0.22)'
-                      : '1px solid rgba(201,162,39,0.28)',
-                    color: textMain,
-                    boxShadow: isDark
-                      ? 'inset 0 2px 6px rgba(0,0,0,0.35)'
-                      : 'inset 0 2px 4px rgba(0,0,0,0.04)',
-                  }}
-                  placeholder="admin"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  required
-                  autoComplete="username"
-                  onFocus={(e) => {
-                    e.currentTarget.style.borderColor = green;
-                    e.currentTarget.style.boxShadow = `0 0 0 3px ${isDark ? 'rgba(163,230,53,0.15)' : 'rgba(101,163,13,0.15)'}`;
-                  }}
-                  onBlur={(e) => {
-                    e.currentTarget.style.borderColor = isDark
-                      ? 'rgba(232,197,71,0.22)'
-                      : 'rgba(201,162,39,0.28)';
-                    e.currentTarget.style.boxShadow = isDark
-                      ? 'inset 0 2px 6px rgba(0,0,0,0.35)'
-                      : 'inset 0 2px 4px rgba(0,0,0,0.04)';
-                  }}
-                />
+                {error}
               </div>
-            </div>
+            )}
 
-            <div>
-              <label
-                className="block text-xs font-bold mb-1.5"
-                style={{ color: isDark ? 'rgba(232,197,71,0.75)' : 'rgba(122,100,24,0.85)' }}
-              >
-                رمز عبور
-              </label>
-              <div className="relative">
-                <Lock
-                  size={16}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                  style={{ color: isDark ? 'rgba(232,197,71,0.4)' : 'rgba(168,132,31,0.5)' }}
-                />
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  className="w-full rounded-xl py-3.5 pr-10 pl-10 text-sm outline-none transition-shadow"
-                  style={{
-                    background: isDark ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.95)',
-                    border: isDark
-                      ? '1px solid rgba(232,197,71,0.22)'
-                      : '1px solid rgba(201,162,39,0.28)',
-                    color: textMain,
-                    boxShadow: isDark
-                      ? 'inset 0 2px 6px rgba(0,0,0,0.35)'
-                      : 'inset 0 2px 4px rgba(0,0,0,0.04)',
-                  }}
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  autoComplete="current-password"
-                  onFocus={(e) => {
-                    e.currentTarget.style.borderColor = green;
-                    e.currentTarget.style.boxShadow = `0 0 0 3px ${isDark ? 'rgba(163,230,53,0.15)' : 'rgba(101,163,13,0.15)'}`;
-                  }}
-                  onBlur={(e) => {
-                    e.currentTarget.style.borderColor = isDark
-                      ? 'rgba(232,197,71,0.22)'
-                      : 'rgba(201,162,39,0.28)';
-                    e.currentTarget.style.boxShadow = isDark
-                      ? 'inset 0 2px 6px rgba(0,0,0,0.35)'
-                      : 'inset 0 2px 4px rgba(0,0,0,0.04)';
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute left-3.5 top-1/2 -translate-y-1/2 p-0.5"
-                  style={{ color: isDark ? 'rgba(232,197,71,0.5)' : 'rgba(168,132,31,0.55)' }}
+            <form onSubmit={handleSubmit} className="space-y-5">
+              {/* Username */}
+              <div>
+                <label
+                  className="block text-xs font-bold mb-2"
+                  style={{ color: 'rgba(255,140,51,0.85)' }}
                 >
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
+                  نام کاربری
+                </label>
+                <div className="relative">
+                  <User
+                    size={17}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                    style={{ color: 'rgba(255,107,0,0.55)' }}
+                  />
+                  <input
+                    type="text"
+                    className="w-full rounded-xl py-3.5 pr-11 pl-4 text-sm outline-none transition-all duration-200"
+                    style={{
+                      background: 'rgba(0,0,0,0.55)',
+                      border: '1px solid rgba(255,107,0,0.28)',
+                      color: '#f5f5f5',
+                      boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.45)',
+                    }}
+                    placeholder="admin"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    required
+                    autoComplete="username"
+                    onFocus={(e) => {
+                      e.currentTarget.style.borderColor = neonGreen;
+                      e.currentTarget.style.boxShadow = `0 0 0 3px rgba(57,255,20,0.18), inset 0 2px 8px rgba(0,0,0,0.45)`;
+                    }}
+                    onBlur={(e) => {
+                      e.currentTarget.style.borderColor = 'rgba(255,107,0,0.28)';
+                      e.currentTarget.style.boxShadow = 'inset 0 2px 8px rgba(0,0,0,0.45)';
+                    }}
+                  />
+                </div>
               </div>
-            </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full mt-2 py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.97] disabled:opacity-50"
-              style={{
-                background: isDark
-                  ? 'linear-gradient(145deg, #f0d060 0%, #e8c547 40%, #a3e635 100%)'
-                  : 'linear-gradient(145deg, #e8c547 0%, #c9a227 40%, #65a30d 100%)',
-                color: '#0a1208',
-                boxShadow: isDark
-                  ? `
-                    0 1px 0 0 rgba(255,255,255,0.25) inset,
-                    0 6px 0 0 rgba(100,80,10,0.35),
-                    0 12px 28px -4px rgba(232,197,71,0.4),
-                    0 0 24px -4px rgba(163,230,53,0.25)
-                  `
-                  : `
-                    0 1px 0 0 rgba(255,255,255,0.4) inset,
-                    0 5px 0 0 rgba(120,95,15,0.25),
-                    0 12px 24px -4px rgba(201,162,39,0.35)
+              {/* Password */}
+              <div>
+                <label
+                  className="block text-xs font-bold mb-2"
+                  style={{ color: 'rgba(255,140,51,0.85)' }}
+                >
+                  رمز عبور
+                </label>
+                <div className="relative">
+                  <Lock
+                    size={17}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                    style={{ color: 'rgba(255,107,0,0.55)' }}
+                  />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    className="w-full rounded-xl py-3.5 pr-11 pl-11 text-sm outline-none transition-all duration-200"
+                    style={{
+                      background: 'rgba(0,0,0,0.55)',
+                      border: '1px solid rgba(255,107,0,0.28)',
+                      color: '#f5f5f5',
+                      boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.45)',
+                    }}
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    autoComplete="current-password"
+                    onFocus={(e) => {
+                      e.currentTarget.style.borderColor = neonGreen;
+                      e.currentTarget.style.boxShadow = `0 0 0 3px rgba(57,255,20,0.18), inset 0 2px 8px rgba(0,0,0,0.45)`;
+                    }}
+                    onBlur={(e) => {
+                      e.currentTarget.style.borderColor = 'rgba(255,107,0,0.28)';
+                      e.currentTarget.style.boxShadow = 'inset 0 2px 8px rgba(0,0,0,0.45)';
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute left-3.5 top-1/2 -translate-y-1/2 p-0.5 transition-colors"
+                    style={{ color: 'rgba(255,107,0,0.6)' }}
+                  >
+                    {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Submit Button – Heavy 3D */}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full mt-3 py-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2.5 transition-all duration-200 active:scale-[0.97] disabled:opacity-55"
+                style={{
+                  background: `linear-gradient(145deg, ${orangeBright} 0%, ${orange} 45%, #e05a00 100%)`,
+                  color: '#0a0a0a',
+                  border: '1px solid rgba(255,200,120,0.45)',
+                  boxShadow: `
+                    0 1px 0 0 rgba(255,255,255,0.3) inset,
+                    0 7px 0 0 #b34a00,
+                    0 14px 28px -4px rgba(255,107,0,0.55),
+                    0 0 30px -6px rgba(57,255,20,0.2)
                   `,
-                border: '1px solid rgba(245,230,163,0.4)',
-                transform: 'translateY(-1px)',
-              }}
-            >
-              {loading ? (
-                'در حال ورود...'
-              ) : (
-                <>
-                  ورود به سیستم
-                  <ArrowLeft size={18} />
-                </>
-              )}
-            </button>
-          </form>
+                  transform: 'translateY(-2px)',
+                  textShadow: '0 1px 0 rgba(255,255,255,0.2)',
+                }}
+              >
+                {loading ? (
+                  <span className="flex items-center gap-2">
+                    <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+                    در حال ورود...
+                  </span>
+                ) : (
+                  <>
+                    ورود به سیستم
+                    <ArrowLeft size={18} strokeWidth={2.5} />
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
         </div>
 
         <p
-          className="text-center text-[10px] mt-7 font-medium tracking-[0.2em]"
-          style={{ color: textMuted }}
+          className="text-center text-[10px] mt-8 font-semibold tracking-[0.28em]"
+          style={{ color: 'rgba(255,255,255,0.28)' }}
         >
-          ALPHA GYM · MANAGEMENT SYSTEM
+          ALPHA GYM · POWERED BY STRENGTH
         </p>
       </div>
+
+      {/* Keyframes for particles */}
+      <style>{`
+        @keyframes floatParticle {
+          0%, 100% { transform: translateY(0) translateX(0); opacity: 0.3; }
+          50% { transform: translateY(-28px) translateX(12px); opacity: 0.7; }
+        }
+        .animate-fade-in {
+          animation: fadeIn 0.7s ease-out forwards;
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(16px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
     </div>
   );
 }
