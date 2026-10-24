@@ -12,6 +12,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "jalali-moment": "^3.3.11",
-    "node-cron": "^3.0.3"
+    "node-cron": "^3.0.3",
+    "xlsx": "^0.18.5"
   }
 }
