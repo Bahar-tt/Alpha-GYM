@@ -24,8 +24,8 @@ export default function Login() {
     const centerX = rect.width / 2;
     const centerY = rect.height / 2;
     setTilt({
-      x: ((y - centerY) / centerY) * -6,
-      y: ((x - centerX) / centerX) * 6,
+      x: ((y - centerY) / centerY) * -5,
+      y: ((x - centerX) / centerX) * 5,
     });
   };
 
@@ -42,30 +42,26 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex bg-[#0a0a0a] overflow-hidden">
-      {/* ========== LEFT PANEL – Form ========== */}
-      <div className="w-full lg:w-[42%] xl:w-[38%] flex flex-col justify-center px-8 sm:px-12 lg:px-14 xl:px-16 relative z-10">
-        {/* subtle left bg */}
-        <div className="absolute inset-0 bg-gradient-to-br from-[#111] via-[#0c0c0c] to-[#080808]" />
+    <div className="min-h-screen grid grid-cols-1 lg:grid-cols-5 bg-[#0a0a0a] overflow-hidden">
+      {/* ========== FORM – LEFT (cols 1-2) ========== */}
+      <div className="lg:col-span-2 flex flex-col justify-center px-8 sm:px-10 lg:px-12 xl:px-14 relative order-2 lg:order-1">
+        <div className="absolute inset-0 bg-[#0c0c0c]" />
 
-        <div className="relative z-10 max-w-[360px] mx-auto w-full" dir="rtl">
+        <div className="relative z-10 w-full max-w-[340px] mx-auto" dir="rtl">
           {/* Logo */}
-          <div className="mb-10 text-center">
+          <div className="mb-9 text-center">
             <img
               src="/v5.png"
               alt="Alpha GYM"
-              className="mx-auto w-[150px] sm:w-[170px] h-auto"
+              className="mx-auto w-[140px] sm:w-[160px] h-auto"
               style={{
-                filter: 'drop-shadow(0 0 12px rgba(255,180,0,0.45)) drop-shadow(0 4px 16px rgba(0,0,0,0.5))',
+                filter: 'drop-shadow(0 0 14px rgba(245,197,24,0.5)) drop-shadow(0 4px 12px rgba(0,0,0,0.5))',
               }}
             />
-            <h1
-              className="mt-5 text-3xl sm:text-4xl font-black tracking-[0.12em] text-white"
-              style={{ textShadow: '0 2px 12px rgba(0,0,0,0.4)' }}
-            >
-              ALPHA <span style={{ color: '#f5c518' }}>GYM</span>
+            <h1 className="mt-4 text-[28px] sm:text-[32px] font-black tracking-[0.1em] text-white">
+              ALPHA <span className="text-[#f5c518]">GYM</span>
             </h1>
-            <p className="mt-2 text-xs font-medium tracking-[0.3em] uppercase text-white/40">
+            <p className="mt-1.5 text-[11px] font-medium tracking-[0.28em] uppercase text-white/35">
               Management System
             </p>
           </div>
@@ -75,19 +71,18 @@ export default function Login() {
             ref={cardRef}
             onMouseMove={handleMouseMove}
             onMouseLeave={handleMouseLeave}
-            style={{ perspective: '900px' }}
+            style={{ perspective: '800px' }}
           >
             <div
-              className="rounded-2xl p-7 sm:p-8 transition-transform duration-200 ease-out"
+              className="rounded-2xl p-6 sm:p-7 transition-transform duration-200 ease-out"
               style={{
-                background: 'rgba(18,18,18,0.85)',
-                border: '1px solid rgba(255,255,255,0.07)',
-                boxShadow: '0 20px 50px -12px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.04)',
+                background: 'rgba(20,20,20,0.9)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                boxShadow: '0 16px 40px -10px rgba(0,0,0,0.65)',
                 transform: `rotateX(${tilt.x}deg) rotateY(${tilt.y}deg)`,
-                backdropFilter: 'blur(12px)',
               }}
             >
-              <h2 className="text-center text-[15px] font-semibold text-white/90 mb-6">
+              <h2 className="text-center text-sm font-semibold text-white/85 mb-5">
                 ورود به پنل مدیریت
               </h2>
 
@@ -97,16 +92,14 @@ export default function Login() {
                 </div>
               )}
 
-              <form onSubmit={handleSubmit} className="space-y-5">
+              <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-medium text-white/50 mb-2">
-                    نام کاربری
-                  </label>
+                  <label className="block text-xs font-medium text-white/45 mb-1.5">نام کاربری</label>
                   <div className="relative">
-                    <User size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none" />
+                    <User size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/25 pointer-events-none" />
                     <input
                       type="text"
-                      className="w-full rounded-xl py-3.5 pr-10 pl-4 text-sm bg-black/40 border border-white/10 text-white placeholder:text-white/25 outline-none focus:border-[#f5c518]/60 focus:ring-2 focus:ring-[#f5c518]/15 transition-all"
+                      className="w-full rounded-xl py-3 pr-9 pl-3 text-sm bg-black/50 border border-white/10 text-white placeholder:text-white/20 outline-none focus:border-[#f5c518]/50 focus:ring-1 focus:ring-[#f5c518]/20 transition-all"
                       placeholder="admin"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
@@ -116,14 +109,12 @@ export default function Login() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-white/50 mb-2">
-                    رمز عبور
-                  </label>
+                  <label className="block text-xs font-medium text-white/45 mb-1.5">رمز عبور</label>
                   <div className="relative">
-                    <Lock size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none" />
+                    <Lock size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/25 pointer-events-none" />
                     <input
                       type={showPassword ? 'text' : 'password'}
-                      className="w-full rounded-xl py-3.5 pr-10 pl-10 text-sm bg-black/40 border border-white/10 text-white placeholder:text-white/25 outline-none focus:border-[#f5c518]/60 focus:ring-2 focus:ring-[#f5c518]/15 transition-all"
+                      className="w-full rounded-xl py-3 pr-9 pl-9 text-sm bg-black/50 border border-white/10 text-white placeholder:text-white/20 outline-none focus:border-[#f5c518]/50 focus:ring-1 focus:ring-[#f5c518]/20 transition-all"
                       placeholder="••••••••"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
@@ -132,9 +123,9 @@ export default function Login() {
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/35 hover:text-white/60 transition-colors"
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/55 transition-colors"
                     >
-                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
                     </button>
                   </div>
                 </div>
@@ -144,9 +135,9 @@ export default function Login() {
                   disabled={loading}
                   className="w-full mt-1 py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50"
                   style={{
-                    background: 'linear-gradient(135deg, #f5c518 0%, #e0a800 100%)',
+                    background: 'linear-gradient(135deg, #f5c518, #e0a800)',
                     color: '#1a1400',
-                    boxShadow: '0 4px 16px -2px rgba(245,197,24,0.4)',
+                    boxShadow: '0 4px 14px -2px rgba(245,197,24,0.35)',
                   }}
                 >
                   {loading ? (
@@ -157,7 +148,7 @@ export default function Login() {
                   ) : (
                     <>
                       ورود به سیستم
-                      <ArrowLeft size={17} strokeWidth={2.5} />
+                      <ArrowLeft size={16} strokeWidth={2.5} />
                     </>
                   )}
                 </button>
@@ -165,34 +156,25 @@ export default function Login() {
             </div>
           </div>
 
-          <p className="text-center text-[10px] mt-8 tracking-[0.2em] text-white/20">
+          <p className="text-center text-[10px] mt-7 tracking-[0.2em] text-white/18">
             ALPHA GYM · POWERED BY STRENGTH
           </p>
         </div>
       </div>
 
-      {/* ========== RIGHT PANEL – Hero Image ========== */}
-      <div className="hidden lg:block lg:w-[58%] xl:w-[62%] relative">
+      {/* ========== HERO – RIGHT (cols 3-5) ========== */}
+      <div className="hidden lg:block lg:col-span-3 relative order-1 lg:order-2">
         <img
           src="/hero-woman.jpg"
           alt=""
-          className="absolute inset-0 w-full h-full object-cover object-center"
-          style={{
-            filter: 'brightness(0.85) contrast(1.08) saturate(1.1)',
-          }}
+          className="absolute inset-0 w-full h-full object-cover object-[center_20%]"
+          style={{ filter: 'brightness(0.9) contrast(1.05)' }}
         />
-        {/* soft left fade so it blends with form panel */}
+        {/* soft left blend */}
         <div
           className="absolute inset-0"
           style={{
-            background: 'linear-gradient(90deg, rgba(10,10,10,0.75) 0%, rgba(10,10,10,0.2) 25%, transparent 50%)',
-          }}
-        />
-        {/* bottom vignette */}
-        <div
-          className="absolute inset-0"
-          style={{
-            background: 'linear-gradient(to top, rgba(10,10,10,0.5) 0%, transparent 35%)',
+            background: 'linear-gradient(90deg, rgba(10,10,10,0.55) 0%, transparent 30%)',
           }}
         />
       </div>
