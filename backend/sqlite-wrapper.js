@@ -29,15 +29,15 @@ try {
     }
 
     all(...params) {
-      const flat = params.length === 1 && Array.isArray(params[0])<｜tool▁sep｜>params : params;
+      const flat = params.length === 1 && Array.isArray(params[0]) ? params[0] : params;
       const stmt = this.db.prepare(this.sql);
       return stmt.all(...flat.map((v) => (v === undefined ? null : v)));
     }
   }
 
   class DatabaseClass {
-    constructor(path) {
-      this.db = new DatabaseSync(path);
+    constructor(dbPath) {
+      this.db = new DatabaseSync(dbPath);
     }
 
     prepare(sql) {
@@ -52,7 +52,7 @@ try {
       return (...args) => {
         this.db.exec('BEGIN');
         try {
-          const result = fn(...args);
+          const result = fnfn(...args);
           this.db.exec('COMMIT');
           return result;
         } catch (e) {
