@@ -4215,6 +4215,7 @@ app.delete('/ftm/:id', ftmGuards, (req, res) => {
 });
 
 require('./attendanceScan')(app, db, { requireAuth, PORT });
+require('./statsPublic')(app, db);
 
 /* =========================
    START SERVER
