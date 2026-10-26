@@ -1,5 +1,5 @@
 require('dotenv').config();
-const Database = require('../sqlite-wrapper');
+const Database = require('better-sqlite3');
 const path     = require('path');
 const https    = require('https');
 const dns      = require('dns');
@@ -18,11 +18,7 @@ if (!KAVENEGAR_API_KEY) {
   console.error('[FATAL] KAVENEGAR_API_KEY تنظیم نشده! فایل .env را بررسی کنید.');
 }
 
-// ✅ FIX: DNS پیش‌فرض سرور (/etc/resolv.conf) برای resolver داخلی نود (c-ares)
-// روی این سرور ناپایدار/کند بود و باعث خطای EAI_AGAIN و Timeout در ارسال پیامک
-// می‌شد (در حالی که curl که از مسیر دیگری resolve می‌کند مشکلی نداشت).
-// اینجا یک Resolver مجزا فقط برای resolve کردن دامنه‌ی کاوه‌نگار با DNSهای
-// معتبر (گوگل/کلودفلر) می‌سازیم، بدون اینکه روی بقیه‌ی DNS سیستم اثر بگذارد.
+
 const kavenegarResolver = new dns.Resolver();
 kavenegarResolver.setServers(['8.8.8.8', '1.1.1.1']);
 
@@ -111,9 +107,7 @@ async function kavenegarSend(receptor, message) {
   });
 }
 
-/* =========================
-   CORE SMS ENGINE
-   (فقط یک نسخه — نسخه‌های تکراری قبلی حذف شدند)
+/*
 ========================= */
 async function sendSMS({ member_id, name, phone, message, type = 'general' }) {
   // ⚠️ توجه: پارامتر status دیگر از بیرون پذیرفته نمی‌شود.
