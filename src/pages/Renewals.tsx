@@ -155,7 +155,9 @@ export default function Renewals() {
 
   return (
     <div className="space-y-6">
-      <div>
+      <div
+      className="page-hero"
+      >
         <h1 className="page-title">تمدید عضویت</h1>
         <p className="page-subtitle">اعضای منقضی — تأیید تمدید با صدور فیش آنلاین</p>
       </div>

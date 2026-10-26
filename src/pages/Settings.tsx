@@ -137,7 +137,9 @@ export default function Settings() {
 
   return (
     <div className="space-y-6">
-      <div>
+      <div
+      className="page-hero"
+      >
         <h1 className="page-title">تنظیمات پنل</h1>
         <p className="page-subtitle">نسخه سیستم، پشتیبان‌گیری کامل و به‌روزرسانی</p>
       </div>

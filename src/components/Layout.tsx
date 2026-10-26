@@ -66,6 +66,31 @@ export default function Layout() {
   const displayName = profile?.full_name?.trim() || 'کاربر';
   const roleLabel = isAdmin ? 'مدیر سیستم' : role === 'staff' ? 'منشی' : 'کاربر';
 
+  // حالت سه‌بعدی: کارت‌های آماری با حرکت موس کمی کج می‌شوند
+  useEffect(() => {
+    const reset = (el: HTMLElement | null) => {
+      if (el) el.style.transform = '';
+    };
+    let last: HTMLElement | null = null;
+    const onMove = (e: MouseEvent) => {
+      const card = (e.target as HTMLElement | null)?.closest?.('.stat-card') as HTMLElement | null;
+      if (last && last !== card) reset(last);
+      last = card;
+      if (!card) return;
+      const r = card.getBoundingClientRect();
+      const x = (e.clientX - r.left) / r.width - 0.5;
+      const y = (e.clientY - r.top) / r.height - 0.5;
+      card.style.transform = `perspective(900px) rotateY(${-x * 12}deg) rotateX(${y * 12}deg) translateZ(8px)`;
+    };
+    const onLeave = () => reset(last);
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseleave', onLeave);
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseleave', onLeave);
+    };
+  }, []);
+
   useEffect(() => {
     (async () => {
       const v = await getSystemVersion();
@@ -107,15 +132,12 @@ export default function Layout() {
           className="h-16 shrink-0 px-5 flex items-center gap-3"
           style={{ borderBottom: '1px solid var(--border-sidebar)' }}
         >
-          <div
-            className="w-11 h-11 rounded-xl flex items-center justify-center overflow-hidden shrink-0 animate-soft-pulse"
-            style={{
-              background: 'linear-gradient(145deg, #0a1208 0%, #1a2e14 50%, #0c1810 100%)',
-              boxShadow: '0 0 20px rgba(163, 230, 53, 0.35), inset 0 0 0 1px rgba(163, 230, 53, 0.35)',
-            }}
-          >
-            <img src="/v5.png" alt="Alpha" className="w-9 h-9 object-contain" />
-          </div>
+          <img
+            src="/logo-emblem.webp"
+            alt="Alpha"
+            className="h-11 w-auto shrink-0 object-contain"
+            style={{ filter: 'drop-shadow(0 0 8px rgba(255, 150, 30, 0.75))' }}
+          />
           <div className="min-w-0 flex-1">
             <h1 className="text-sm font-bold tracking-wide" style={{ color: 'var(--text)' }}>
               Alpha GYM
@@ -173,8 +195,8 @@ export default function Layout() {
             <div
               className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold shrink-0"
               style={{
-                background: 'linear-gradient(135deg, #bef264, #65a30d)',
-                color: '#0a1208',
+                background: 'linear-gradient(135deg, #ffa24a, #ff6a00)',
+                color: '#ffffff',
               }}
             >
               {displayName.charAt(0)}

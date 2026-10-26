@@ -134,7 +134,9 @@ export default function Coaches() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div
+        className="page-hero flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+      >
         <div>
           <h1 className="page-title">مربیان</h1>
           <p className="page-subtitle">ثبت مربی، رشته تخصصی و درصد حق‌الزحمه — افزودن و حذف مربی از همین صفحه</p>

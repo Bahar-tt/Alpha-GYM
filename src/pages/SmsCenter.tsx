@@ -254,7 +254,9 @@ export default function SmsCenter() {
         </div>
       )}
 
-      <div>
+      <div
+      className="page-hero"
+      >
         <h1 className="page-title">مرکز پیامک</h1>
         <p className="page-subtitle">ارسال تکی، گروهی و گزارش پیامک‌ها در یک صفحه</p>
       </div>

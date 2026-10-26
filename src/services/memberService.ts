@@ -241,3 +241,12 @@ export async function recordAttendance(payload: {
 export function isMemberActive(expiryDate: string): boolean {
   return expiryDate >= todayIso();
 }
+
+/**
+ * فقط «تعداد» اعضای فعال — برای صفحه‌ی ورود (بدون هیچ اطلاعات شخصی).
+ * نیازمند endpoint عمومی GET /stats/active-count که { active: number } برمی‌گرداند.
+ */
+export async function getActiveMemberCount(): Promise<number | null> {
+  const r = await apiGet<{ active?: number }>('/stats/active-count');
+  return !r.error && r.data && typeof r.data.active === 'number' ? r.data.active : null;
+}

@@ -153,32 +153,18 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Welcome banner — soft sky */}
+      {/* Welcome banner — gym photo hero */}
       <div
-        className="relative overflow-hidden rounded-2xl p-5 sm:p-6"
-        style={{
-          background: 'linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 40%, #ffffff 100%)',
-          border: '1px solid color-mix(in srgb, var(--accent) 28%, transparent)',
-          boxShadow: 'var(--shadow)',
-        }}
+        className="page-hero hero-lg flex flex-col justify-end gap-4"
       >
-        <div
-          className="pointer-events-none absolute inset-0"
-          style={{
-            background:
-              'radial-gradient(ellipse 70% 80% at 100% 0%, rgba(14, 165, 233, 0.12), transparent 55%)',
-          }}
-        />
-        <div className="relative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div>
             <p className="text-xs font-medium flex items-center gap-1.5 mb-1" style={{ color: 'var(--accent)' }}>
               <Sparkles size={14} />
               خوش آمدید به Alpha GYM
             </p>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-              سلام، {greetName}
-            </h1>
-            <p className="text-sm mt-1.5 flex items-center gap-1.5" style={{ color: 'var(--text-secondary)' }}>
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight">سلام، {greetName}</h1>
+            <p className="text-sm mt-1.5 flex items-center gap-1.5">
               <Calendar size={14} />
               {persianDate}
             </p>
@@ -188,7 +174,7 @@ export default function Dashboard() {
             style={{
               background: 'var(--accent-soft)',
               color: 'var(--accent)',
-              border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
+              border: '1px solid var(--border)',
             }}
           >
             <Activity size={16} />
