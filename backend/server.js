@@ -371,36 +371,36 @@ db.exec(`
     coach_id INTEGER,
     coach_name TEXT,
 
-    // ── مشخصات فردی ──
+    -- ── مشخصات فردی ──
     age INTEGER,
     height_cm INTEGER,
     weight_kg REAL,
 
-    // ── سابقه ورزشی ──
+    -- ── سابقه ورزشی ──
     bodybuilding_years REAL,
     last_program_date TEXT,
     days_per_week INTEGER,
 
-    // ── سطح ورزشکار ──
+    -- ── سطح ورزشکار ──
     level TEXT,               -- beginner | semi_pro | pro
     training_place TEXT,      -- full_gym | limited_gym | home
     home_equipment TEXT,
 
-    // ── هدف (چندگزینه‌ای، JSON آرایه) ──
+    -- ── هدف (چندگزینه‌ای، JSON آرایه) ──
     goals TEXT,
 
-    // ── سوابق پزشکی ──
+    -- ── سوابق پزشکی ──
     injuries TEXT,            -- JSON آرایه: knee | shoulder | back | ankle | other
     injury_other TEXT,
     current_pain TEXT,
     doctor_restrictions TEXT,
 
-    // ── عکس از ۳ زاویه (بدون صورت) ──
+    -- ── عکس از ۳ زاویه (بدون صورت) ──
     photo_back TEXT,
     photo_front TEXT,
     photo_side TEXT,
 
-    // ── اندازه‌ها ──
+    -- ── اندازه‌ها ──
     measured_at TEXT,
     m_weight REAL,
     m_chest REAL,
@@ -410,7 +410,7 @@ db.exec(`
     m_glutes REAL,
     m_thigh REAL,
 
-    // ── وضعیت و یادداشت ──
+    -- ── وضعیت و یادداشت ──
     notes TEXT,
     status TEXT NOT NULL DEFAULT 'draft',   -- draft | final
     created_by TEXT,
