@@ -4,6 +4,31 @@ const crypto = require('crypto');
 const Database = require('./sqlite-wrapper');
 const path = require('path');
 const fs = require('fs');
+
+// ── بارگذاری .env بدون وابستگی خارجی (قبل از require سرویس‌ها) ──
+(function loadDotEnv() {
+  try {
+    const envPath = path.join(__dirname, '.env');
+    if (!fs.existsSync(envPath)) return;
+    const text = fs.readFileSync(envPath, 'utf8');
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const eq = line.indexOf('=');
+      if (eq < 1) continue;
+      const key = line.slice(0, eq).trim();
+      let val = line.slice(eq + 1).trim();
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      if (process.env[key] === undefined) process.env[key] = val;
+    }
+    console.log('[ENV] .env loaded');
+  } catch (err) {
+    console.error('[ENV] .env load failed:', err.message);
+  }
+})();
+
 const { todayJalali } = require('./utils/date');
 const { onMemberCreated } = require('./services/eventService');
 const { sendSMS } = require('./services/smsService');
@@ -38,12 +63,45 @@ const {
 const PORT = 3001;
 const ENV = process.env.NODE_ENV || 'development';
 const DB_PATH = path.join(__dirname, 'gym.db');
+const STATIC_DIR = process.env.STATIC_DIR || path.join(__dirname, '..', 'dist');
+const SPA_INDEX = path.join(STATIC_DIR, 'index.html');
+const SPA_ROUTES = new Set([
+  '/dashboard', '/members', '/renewals', '/attendance', '/staff-attendance', '/sms',
+  '/coaches', '/coach', '/accounting', '/settings', '/users', '/login',
+]);
 
 console.log(`[ENV] Running in ${ENV}`);
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// ── حالت مستقل (بدون nginx): پذیرش پیشوند /api ──
+// پنل وب درخواست‌ها را به /api/... می‌فرستد؛ پشت nginx این پیشوند حذف می‌شود،
+// اما وقتی خودِ همین سرور پنل را سرو می‌کند باید خودش حذفش کند.
+app.use((req, _res, next) => {
+  if (req.url === '/api' || req.url.startsWith('/api/') || req.url.startsWith('/api?')) {
+    req.isApiRequest = true;
+    req.url = req.url.slice(4) || '/';
+  }
+  next();
+});
+
+// ── SPA deep links in standalone mode ──
+// Some page URLs (/members, /renewals, ...) are also legacy API routes.
+// A browser navigation must get index.html, while /api/* and JSON clients
+// must continue to the API. Only GET/HEAD with an explicit text/html Accept
+// is treated as a page navigation.
+app.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+  if (req.isApiRequest) return next();
+  if (!String(req.headers.accept || '').includes('text/html')) return next();
+  if (!fs.existsSync(SPA_INDEX)) return next();
+  if (req.path === '/' || SPA_ROUTES.has(req.path) || req.path.startsWith('/receipt/')) {
+    return res.sendFile(SPA_INDEX);
+  }
+  next();
+});
 
 const db = new Database(DB_PATH);
 
@@ -705,6 +763,9 @@ for (const [col, def] of [
   ['default_share',  'INTEGER NOT NULL DEFAULT 50'],
   ['monthly_salary', 'INTEGER NOT NULL DEFAULT 0'],
   ['notes',          'TEXT'],
+  // دسترسی‌های مربی: جلسه خصوصی و نوشتن برنامه
+  ['can_private',    'INTEGER NOT NULL DEFAULT 1'],
+  ['can_program',    'INTEGER NOT NULL DEFAULT 1'],
 ]) {
   if (!coachCols.includes(col)) db.exec(`ALTER TABLE coaches ADD COLUMN ${col} ${def}`);
 }
@@ -816,18 +877,24 @@ function verifyPassword(password, stored) {
   return candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected);
 }
 
-// ✅ seed کاربران پیش‌فرض (فقط اولین اجرا)
+// ✅ seed کاربران پیش‌فرض فقط در دیتابیس خالی؛ رمزها تصادفی یا از env
 const staffCount = db.prepare('SELECT COUNT(*) AS c FROM staff').get().c;
 if (staffCount === 0) {
+  const seedAdminPw = String(process.env.INITIAL_ADMIN_PASSWORD || '').trim() ||
+    (crypto.randomBytes(12).toString('base64url') + '!A1');
+  const seedStaffPw = String(process.env.INITIAL_STAFF_PASSWORD || '').trim() ||
+    (crypto.randomBytes(12).toString('base64url') + '!A1');
   const insStaff = db.prepare(
     `INSERT INTO staff (username, password_hash, full_name, role) VALUES (?, ?, ?, ?)`
   );
   const seedTx = db.transaction(() => {
-    insStaff.run('admin', hashPassword('admin123'), 'مدیر سیستم', 'admin');
-    insStaff.run('staff', hashPassword('staff123'), 'منشی', 'staff');
+    insStaff.run('admin', hashPassword(seedAdminPw), 'مدیر سیستم', 'admin');
+    insStaff.run('staff', hashPassword(seedStaffPw), 'منشی', 'staff');
   });
   seedTx();
-  console.log('[AUTH] Default staff seeded (admin/admin123 , staff/staff123)');
+  console.log('[AUTH] Default staff seeded. Set INITIAL_ADMIN_PASSWORD/INITIAL_STAFF_PASSWORD next time.');
+  console.log(`[AUTH] initial admin password: ${seedAdminPw}`);
+  console.log(`[AUTH] initial staff password: ${seedStaffPw}`);
 }
 
 // ✅ ساخت نشست + نمایش عمومی کاربر
@@ -1276,6 +1343,14 @@ function attachSports(m, sports) {
     used_sessions: list.reduce((sum, s) => sum + (Number(s.used_sessions) || 0), 0),
     weekly_sessions: list.reduce((sum, s) => sum + (Number(s.weekly_sessions) || 0), 0),
     tuition_amount: list.reduce((sum, s) => sum + (Number(s.tuition_amount) || 0), 0),
+    monthly_fee: list.reduce((sum, s) => sum + (Number(s.tuition_amount) || 0), 0),
+    coach_commission_percent: (() => {
+      const cid = (list.find((s) => s.coach_id) || {}).coach_id;
+      if (!cid) return 0;
+      const c = db.prepare('SELECT default_share FROM coaches WHERE id = ?').get(cid);
+      return c ? (Number(c.default_share) || 0) : 0;
+    })(),
+    personnel_code: m.member_code || null,
     sports: list,
   };
 }
@@ -1535,6 +1610,96 @@ function recordPayment({ member_id, member_name, sport, amount, type = 'renewal'
   return { id: res.lastInsertRowid, coach_id: coach && coach.coach_id ? Number(coach.coach_id) : null, coach_share: share };
 }
 
+/* =========================
+   RECEIPTS (فیش عمومی برای پیامک / چاپ)
+========================= */
+db.exec(`
+  CREATE TABLE IF NOT EXISTS receipts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token TEXT NOT NULL UNIQUE,
+    member_id INTEGER,
+    member_name TEXT,
+    phone TEXT,
+    type TEXT NOT NULL,
+    amount REAL NOT NULL DEFAULT 0,
+    months INTEGER DEFAULT 0,
+    membership_type TEXT,
+    description TEXT,
+    period_start TEXT,
+    period_end TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )
+`);
+
+function createReceipt(payload) {
+  const token = crypto.randomBytes(16).toString('hex');
+  const info = db.prepare(`
+    INSERT INTO receipts (
+      token, member_id, member_name, phone, type, amount, months,
+      membership_type, description, period_start, period_end
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    token,
+    payload.member_id != null ? Number(payload.member_id) : null,
+    payload.member_name || null,
+    payload.phone || null,
+    payload.type || 'registration',
+    Number(payload.amount) || 0,
+    Number(payload.months) || 0,
+    payload.membership_type || null,
+    payload.description || null,
+    payload.period_start || null,
+    payload.period_end || null,
+  );
+  return db.prepare('SELECT * FROM receipts WHERE id = ?').get(info.lastInsertRowid);
+}
+
+app.post('/receipts', requireAuth, (req, res) => {
+  try {
+    res.status(201).json(createReceipt(req.body || {}));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create receipt' });
+  }
+});
+
+// عمومی: لینک فیش برای پیامک/مشتری (بدون توکن ورود)
+app.get('/receipts/token/:token', (req, res) => {
+  try {
+    const row = db.prepare('SELECT * FROM receipts WHERE token = ?').get(String(req.params.token));
+    if (!row) return res.status(404).json({ error: 'فیش یافت نشد' });
+    res.json(row);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to get receipt' });
+  }
+});
+
+app.get('/receipts/member/:memberId', requireAuth, (req, res) => {
+  try {
+    const rows = db.prepare('SELECT * FROM receipts WHERE member_id = ? ORDER BY id DESC')
+      .all(Number(req.params.memberId));
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to list receipts' });
+  }
+});
+
+app.get('/receipts', requireAuth, requireAdmin, (_req, res) => {
+  try {
+    const rows = db.prepare(
+      `SELECT r.*, m.name AS current_member_name
+       FROM receipts r LEFT JOIN members m ON m.id = r.member_id
+       ORDER BY r.id DESC LIMIT 300`
+    ).all();
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to list receipts' });
+  }
+});
+
 app.get('/members', requireAuth, (_req, res) => {
   try {
     const rows = db.prepare('SELECT * FROM members ORDER BY id DESC').all();
@@ -1553,7 +1718,7 @@ app.get('/members', requireAuth, (_req, res) => {
 app.post('/members', requireAuth, (req, res) => {
   const {
     name, phone, birthday, national_id, referrer, has_insurance, notes,
-    membership_type, sports, goal, member_code,
+    membership_type, sports, goal, member_code, personnel_code,
     // ⬇️ فیلدهای تخت قدیمی (فقط برای سازگاری با فرانت‌های قدیمی)
     expiry_date, start_date,
   } = req.body || {};
@@ -1608,6 +1773,19 @@ app.post('/members', requireAuth, (req, res) => {
     return res.status(400).json({ error: 'حداقل یک رشته ورزشی الزامی است' });
   }
 
+  // 💰 شهریه و جلسات ارسالی فرم وب (فرم پنل مبلغ را به‌صورت فیلد تخت می‌فرستد)
+  const flatFee = Number(req.body && req.body.monthly_fee);
+  if (Number.isFinite(flatFee) && flatFee > 0) {
+    for (const e of entries) {
+      e.tuition_amount = flatFee;
+      if (!e.unit_price) e.unit_price = flatFee;
+    }
+  }
+  const flatWeekly = Number(req.body && req.body.weekly_sessions);
+  if (Number.isFinite(flatWeekly) && flatWeekly > 0) {
+    for (const e of entries) if (!e.weekly_sessions) e.weekly_sessions = flatWeekly;
+  }
+
   const derivedExpiry = entries
     .map((e) => e.expiry_date)
     .filter(Boolean)
@@ -1620,7 +1798,10 @@ app.post('/members', requireAuth, (req, res) => {
     .shift() || start_date || null;
 
   try {
-    const resolvedCode = resolveMemberCode(member_code);
+    const codeInput = (member_code !== undefined && member_code !== null && String(member_code).trim() !== '')
+      ? member_code
+      : personnel_code;
+    const resolvedCode = resolveMemberCode(codeInput);
 
     const insertMember = db.prepare(`
       INSERT INTO members (name, phone, birthday, national_id, referrer, has_insurance, notes, membership_type, start_date, expiry_date, goal, member_code)
@@ -1691,6 +1872,20 @@ app.post('/members', requireAuth, (req, res) => {
 
     const row = memberWithSports(memberId);
 
+    // 🧾 فیش ثبت‌نام (لینک عمومی برای پیامک / چاپ)
+    const receipt = createReceipt({
+      member_id: memberId,
+      member_name: row.name,
+      phone: row.phone,
+      type: 'registration',
+      amount: totalTuition,
+      months: 0,
+      membership_type: row.membership_type,
+      description: 'ثبت‌نام / شروع عضویت',
+      period_start: row.start_date || null,
+      period_end: row.expiry_date || null,
+    });
+
     // 🔥 EVENT SYSTEM
     onMemberCreated(row);
 
@@ -1701,7 +1896,7 @@ app.post('/members', requireAuth, (req, res) => {
       detail: { name: row.name, phone: row.phone, sports: (row.sports || []).map((s) => s.sport) },
     });
 
-    res.status(201).json(row);
+    res.status(201).json({ ...row, receipt });
   } catch (err) {
     console.error(err);
     if (err && err.message && /کد عضویت/.test(err.message)) {
@@ -1722,7 +1917,7 @@ app.put('/members/:id', requireAuth, (req, res) => {
 
   const {
     name, phone, birthday, national_id, referrer, has_insurance, notes, membership_type,
-    sports, goal, member_code,
+    sports, goal, member_code, personnel_code,
     // ⬇️ فیلدهای تخت قدیمی (مسیر سازگاری: تمدید/بروزرسانی از صفحات قدیمی)
     expiry_date, start_date,
   } = req.body || {};
@@ -1749,13 +1944,16 @@ app.put('/members/:id', requireAuth, (req, res) => {
       return res.status(409).json({ error: `کد ملی قبلاً برای «${dup.name}» ثبت شده است` });
     }
   }
-  if (birthday != null && !String(birthday).trim()) {
+  if (birthday != null && !String(birthday).trim() && String(existing.birthday || '').trim()) {
     return res.status(400).json({ error: 'تاریخ تولد الزامی است' });
   }
 
   let resolvedCode = existing.member_code;
-  if (member_code !== undefined && member_code !== null && String(member_code).trim() !== '') {
-    const code = String(member_code).trim();
+  const codeInput = (member_code !== undefined && member_code !== null && String(member_code).trim() !== '')
+    ? member_code
+    : personnel_code;
+  if (codeInput !== undefined && codeInput !== null && String(codeInput).trim() !== '') {
+    const code = String(codeInput).trim();
     if (!/^\d{1,15}$/.test(code)) {
       return res.status(400).json({ error: 'کد عضویت باید عددی و بدون حرف باشد' });
     }
@@ -1799,6 +1997,17 @@ app.put('/members/:id', requireAuth, (req, res) => {
       const entries = sports.map(normalizeSportEntry).filter(Boolean);
       if (entries.length === 0) {
         return res.status(400).json({ error: 'حداقل یک رشته ورزشی الزامی است' });
+      }
+      const flatFee = Number(req.body && req.body.monthly_fee);
+      if (Number.isFinite(flatFee) && flatFee > 0) {
+        for (const e of entries) {
+          e.tuition_amount = flatFee;
+          if (!e.unit_price) e.unit_price = flatFee;
+        }
+      }
+      const flatWeekly = Number(req.body && req.body.weekly_sessions);
+      if (Number.isFinite(flatWeekly) && flatWeekly > 0) {
+        for (const e of entries) if (!e.weekly_sessions) e.weekly_sessions = flatWeekly;
       }
       const deleteSports = db.prepare('DELETE FROM member_sports WHERE member_id = ?');
       const insertSport = db.prepare(`
@@ -1854,13 +2063,68 @@ app.put('/members/:id', requireAuth, (req, res) => {
     db.prepare(`UPDATE members SET updated_by = ?, updated_at = datetime('now') WHERE id = ?`)
       .run(actor, id);
     const row = memberWithSports(id);
+
+    // 🔁 تمدید: ثبت سابقه + پرداخت + فیش (قبلاً فقط تاریخ عوض می‌شد)
+    let receipt = null;
+    const renewal = req.body && req.body._renewal;
+    if (renewal && typeof renewal === 'object') {
+      try {
+        const oldEnd = existing.expiry_date || null;
+        const newEnd = row.expiry_date || (expiry_date ? String(expiry_date).trim() : null);
+        const amount = Math.max(0, Number(renewal.amount) || 0);
+        const months = Math.max(0, Number(renewal.months) || 0);
+        const mtype = row.membership_type || (membership_type ? String(membership_type).trim() : null);
+        const firstSport = (row.sports || []).find((s) => String(s.sport || '').trim() !== '') || null;
+
+        db.prepare(`
+          INSERT INTO renewals
+            (member_id, sport_id, membership_type, old_end_date, new_end_date, amount, status, renewed_by)
+          VALUES (?, ?, ?, ?, ?, ?, 'completed', ?)
+        `).run(
+          id,
+          firstSport ? firstSport.id : null,
+          mtype,
+          oldEnd,
+          newEnd,
+          amount,
+          actor
+        );
+
+        if (amount > 0) {
+          recordPayment({
+            member_id: id,
+            member_name: row.name,
+            sport: firstSport ? firstSport.sport : null,
+            amount,
+            type: 'renewal',
+            received_by: actor,
+          });
+        }
+
+        receipt = createReceipt({
+          member_id: id,
+          member_name: row.name,
+          phone: row.phone,
+          type: 'renewal',
+          amount,
+          months,
+          membership_type: mtype,
+          description: 'تمدید عضویت',
+          period_start: oldEnd,
+          period_end: newEnd,
+        });
+      } catch (renewErr) {
+        console.error('[renewal]', renewErr);
+      }
+    }
+
     audit(req, 'member.update', {
       entityType: 'member',
       entityId: id,
       memberId: id,
       detail: { name: row.name, phone: row.phone, sports: (row.sports || []).map((s) => s.sport) },
     });
-    res.json(row);
+    res.json(receipt ? { ...row, receipt } : row);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to update member' });
@@ -2245,50 +2509,173 @@ function sendCsv(res, filename, headers, rows) {
   res.send(csv);
 }
 
+/* --- compatibility: extra columns the web panel expects --- */
+(function ensureAccountingColumns() {
+  const addColumn = (table, name, type) => {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+    if (!cols.includes(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+  };
+  addColumn('payments', 'direction', "TEXT DEFAULT 'in'");
+  addColumn('payments', 'title', 'TEXT');
+  addColumn('payments', 'paid_at', 'TEXT');
+  addColumn('expenses', 'spent_at', 'TEXT');
+  addColumn('expenses', 'notes', 'TEXT');
+})();
+
+function mapPaymentRow(p) {
+  const type = p.type || 'manual';
+  const direction = p.direction || (type === 'coach_payout' ? 'out' : 'in');
+  return {
+    id: p.id,
+    type,
+    amount: Number(p.amount) || 0,
+    direction,
+    member_id: p.member_id ?? null,
+    coach_id: p.coach_id ?? null,
+    title: p.title || p.member_name || p.note || null,
+    notes: p.note || null,
+    paid_at: p.paid_at || String(p.created_at || '').slice(0, 10),
+    created_at: p.created_at,
+  };
+}
+
+function mapExpenseRow(e) {
+  return {
+    id: e.id,
+    category: e.category || 'عمومی',
+    title: e.title || '',
+    amount: Number(e.amount) || 0,
+    notes: e.notes || e.note || null,
+    spent_at: e.spent_at || e.date || String(e.created_at || '').slice(0, 10),
+    created_at: e.created_at,
+  };
+}
+
 const accountingGuards = [requireAuth, requireAdmin, requireFeature('accounting')];
 
 // 📊 خلاصه مالی
 app.get('/accounting/summary', accountingGuards, (req, res) => {
   try {
     const { f, t } = periodBounds(req.query.from, req.query.to);
-    const pay = db.prepare(`
-      SELECT COALESCE(SUM(amount),0) AS total, COALESCE(SUM(coach_share),0) AS coach_share, COUNT(*) AS count
-      FROM payments WHERE substr(created_at,1,10) BETWEEN ? AND ?
-    `).get(f, t);
-    const exp = db.prepare(`
-      SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS count
-      FROM expenses WHERE date BETWEEN ? AND ?
-    `).get(f, t);
-    const byType = db.prepare(`
-      SELECT type, COALESCE(SUM(amount),0) AS total, COUNT(*) AS count
-      FROM payments WHERE substr(created_at,1,10) BETWEEN ? AND ?
-      GROUP BY type
-    `).all(f, t);
-    const bySport = db.prepare(`
-      SELECT sport, COALESCE(SUM(amount),0) AS total, COUNT(*) AS count
-      FROM payments
-      WHERE substr(created_at,1,10) BETWEEN ? AND ? AND sport IS NOT NULL AND sport != ''
-      GROUP BY sport ORDER BY total DESC
-    `).all(f, t);
-    const today = db.prepare(`
-      SELECT COALESCE(SUM(amount),0) AS total FROM payments
-      WHERE substr(created_at,1,10) = date('now')
-    `).get();
-    const income = Number(pay.total) || 0;
-    const expenses = Number(exp.total) || 0;
-    const coachShare = Number(pay.coach_share) || 0;
+
+    const activeMembers = Number(db.prepare(
+      "SELECT COUNT(*) AS c FROM members WHERE date(expiry_date) >= date('now')"
+    ).get().c) || 0;
+
+    // درآمد تئوریک ماهانه از شهریه‌های ثبت‌شده روی اشتراک‌های فعال
+    const feeRows = db.prepare(`
+      SELECT ms.tuition_amount AS fee, ms.unit_price AS unit, ms.coach_id,
+             COALESCE(cs.commission_percent, c.default_share, 0) AS pct
+      FROM member_sports ms
+      JOIN members m ON m.id = ms.member_id
+      LEFT JOIN coaches c ON c.id = ms.coach_id
+      LEFT JOIN coach_sports cs ON cs.coach_id = ms.coach_id AND cs.sport = ms.sport
+      WHERE date(m.expiry_date) >= date('now')
+    `).all();
+
+    let monthlyRevenue = 0;
+    let coachShare = 0;
+    for (const r of feeRows) {
+      const fee = Number(r.fee) || Number(r.unit) || 0;
+      monthlyRevenue += fee;
+      coachShare += (fee * (Number(r.pct) || 0)) / 100;
+    }
+
+    const bySpecialty = db.prepare(`
+      SELECT COALESCE(NULLIF(TRIM(ms.sport), ''), 'نامشخص') AS specialty,
+             COUNT(DISTINCT ms.member_id) AS members,
+             COALESCE(SUM(COALESCE(NULLIF(ms.tuition_amount, 0), ms.unit_price, 0)), 0) AS revenue,
+             ROUND(COALESCE(SUM(
+               COALESCE(NULLIF(ms.tuition_amount, 0), ms.unit_price, 0) *
+               COALESCE(cs.commission_percent, c.default_share, 0) / 100.0
+             ), 0)) AS coach_share
+      FROM member_sports ms
+      JOIN members m ON m.id = ms.member_id
+      LEFT JOIN coaches c ON c.id = ms.coach_id
+      LEFT JOIN coach_sports cs ON cs.coach_id = ms.coach_id AND cs.sport = ms.sport
+      WHERE date(m.expiry_date) >= date('now')
+      GROUP BY specialty
+      ORDER BY revenue DESC
+    `).all();
+
+    const byCoach = db.prepare(`
+      SELECT ms.coach_id AS coach_id,
+             COALESCE(c.name, 'بدون مربی') AS coach_name,
+             COALESCE(GROUP_CONCAT(DISTINCT NULLIF(TRIM(ms.sport), '')), '—') AS specialty,
+             COUNT(DISTINCT ms.member_id) AS members,
+             COALESCE(SUM(COALESCE(NULLIF(ms.tuition_amount, 0), ms.unit_price, 0)), 0) AS revenue,
+             COALESCE(c.default_share, 0) AS commission_percent,
+             ROUND(COALESCE(SUM(
+               COALESCE(NULLIF(ms.tuition_amount, 0), ms.unit_price, 0) *
+               COALESCE(cs.commission_percent, c.default_share, 0) / 100.0
+             ), 0)) AS coach_share
+      FROM member_sports ms
+      JOIN members m ON m.id = ms.member_id
+      JOIN coaches c ON c.id = ms.coach_id
+      LEFT JOIN coach_sports cs ON cs.coach_id = ms.coach_id AND cs.sport = ms.sport
+      WHERE date(m.expiry_date) >= date('now') AND ms.coach_id IS NOT NULL
+      GROUP BY ms.coach_id
+      ORDER BY revenue DESC
+    `).all();
+
+    const payments = db.prepare('SELECT * FROM payments ORDER BY id DESC LIMIT 300').all().map(mapPaymentRow);
+    const expenses = db.prepare('SELECT * FROM expenses ORDER BY id DESC LIMIT 300').all().map(mapExpenseRow);
+
+    const paymentsIn = payments.filter((p) => p.direction === 'in').reduce((s, p) => s + p.amount, 0);
+    const paymentsOut = payments.filter((p) => p.direction === 'out').reduce((s, p) => s + p.amount, 0);
+    const expenseTotal = expenses.reduce((s, e) => s + e.amount, 0);
+
+    const ledger = [
+      ...payments.map((p) => ({
+        id: `p${p.id}`,
+        kind: 'payment',
+        direction: p.direction,
+        amount: p.amount,
+        title: p.title || p.type,
+        date: p.paid_at,
+      })),
+      ...expenses.map((e) => ({
+        id: `e${e.id}`,
+        kind: 'expense',
+        direction: 'out',
+        amount: e.amount,
+        title: e.title,
+        date: e.spent_at,
+      })),
+    ]
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+      .slice(0, 300);
+
     res.json({
       from: f,
       to: t,
-      income_total: income,
-      income_today: Number(today.total) || 0,
-      expenses_total: expenses,
-      coach_shares_total: coachShare,
-      net: income - expenses - coachShare,
-      payments_count: Number(pay.count) || 0,
-      expenses_count: Number(exp.count) || 0,
-      by_type: byType,
-      top_sports: bySport,
+      totals: {
+        monthly_revenue: monthlyRevenue,
+        coach_share: Math.round(coachShare),
+        potential_net: Math.round(monthlyRevenue - coachShare),
+        payments_in: paymentsIn,
+        payments_out: paymentsOut,
+        expenses: expenseTotal,
+        cash_in: paymentsIn,
+        cash_out: paymentsOut + expenseTotal,
+        net_balance: paymentsIn - paymentsOut - expenseTotal,
+        active_members: activeMembers,
+      },
+      by_specialty: bySpecialty,
+      by_coach: byCoach,
+      payments,
+      expenses,
+      ledger,
+      // شکل قدیمی (برای کلاینت‌های قبلی)
+      income_total: paymentsIn - paymentsOut,
+      income_today: 0,
+      expenses_total: expenseTotal,
+      coach_shares_total: Math.round(coachShare),
+      net: paymentsIn - paymentsOut - expenseTotal,
+      payments_count: payments.length,
+      expenses_count: expenses.length,
+      by_type: [],
+      top_sports: [],
     });
   } catch (err) {
     console.error(err);
@@ -2326,30 +2713,43 @@ app.get('/accounting/payments', accountingGuards, (req, res) => {
 // ➕ ثبت پرداخت دستی
 app.post('/accounting/payments', accountingGuards, (req, res) => {
   try {
-    const { member_id, member_name, amount, type, method, sport, note, date } = req.body || {};
+    const {
+      member_id, member_name, amount, type, method, sport, note, date,
+      direction, title, paid_at, coach_id,
+    } = req.body || {};
     const amt = Number(amount);
     if (!amt || amt <= 0) {
       return res.status(400).json({ error: 'مبلغ پرداخت باید بزرگ‌تر از صفر باشد' });
     }
     const member = member_id ? db.prepare('SELECT id, name FROM members WHERE id = ?').get(Number(member_id)) : null;
+    const allowedTypes = ['registration', 'renewal', 'manual', 'fee', 'other', 'member_fee', 'coach_payout'];
+    const typeStr = allowedTypes.includes(String(type)) ? String(type) : 'manual';
     const created = recordPayment({
       member_id: member ? member.id : (member_id != null && member_id !== '' ? Number(member_id) : null),
       member_name: member ? member.name : (member_name ? String(member_name).trim() : null),
       sport: sport ? String(sport).trim() : null,
       amount: amt,
-      type: ['registration', 'renewal', 'manual', 'fee', 'other'].includes(String(type)) ? String(type) : 'manual',
+      type: typeStr,
       method: ['cash', 'card', 'transfer', 'pos', 'other'].includes(String(method)) ? String(method) : 'cash',
       note: note ? String(note).trim() : null,
       received_by: req.staff.full_name,
       created_at: date ? `${String(date).slice(0, 10)} ${new Date().toISOString().slice(11, 19)}` : undefined,
     });
+
+    const dir = direction === 'out' || typeStr === 'coach_payout' ? 'out' : 'in';
+    const paidAt = String(paid_at || date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+    const titleVal = title ? String(title).trim() : null;
+    const coachVal = coach_id != null && coach_id !== '' ? Number(coach_id) : null;
+    db.prepare('UPDATE payments SET direction = ?, title = ?, paid_at = ?, coach_id = COALESCE(?, coach_id) WHERE id = ?')
+      .run(dir, titleVal, paidAt, coachVal, created.id);
+
     audit(req, 'accounting.payment', {
       entityType: 'payment',
       entityId: created.id,
       memberId: member ? member.id : null,
-      detail: { amount: amt, type: String(type || 'manual'), sport: sport || null },
+      detail: { amount: amt, type: typeStr, direction: dir, sport: sport || null },
     });
-    res.status(201).json(db.prepare('SELECT * FROM payments WHERE id = ?').get(created.id));
+    res.status(201).json(mapPaymentRow(db.prepare('SELECT * FROM payments WHERE id = ?').get(created.id)));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create payment' });
@@ -2610,7 +3010,7 @@ app.get('/accounting/expenses', accountingGuards, (req, res) => {
 
 app.post('/accounting/expenses', accountingGuards, (req, res) => {
   try {
-    const { title, amount, category, date, note } = req.body || {};
+    const { title, amount, category, date, note, spent_at, notes } = req.body || {};
     if (!title || !String(title).trim()) {
       return res.status(400).json({ error: 'عنوان هزینه الزامی است' });
     }
@@ -2618,17 +3018,19 @@ app.post('/accounting/expenses', accountingGuards, (req, res) => {
     if (!amt || amt <= 0) {
       return res.status(400).json({ error: 'مبلغ هزینه باید بزرگ‌تر از صفر باشد' });
     }
+    const day = date || spent_at;
+    const noteVal = note != null ? note : notes;
     const r = db.prepare('INSERT INTO expenses (title, amount, category, date, note, recorded_by) VALUES (?, ?, ?, ?, ?, ?)')
       .run(
         String(title).trim(),
         amt,
         category ? String(category).trim() : 'عمومی',
-        date ? String(date).slice(0, 10) : new Date().toISOString().slice(0, 10),
-        note ? String(note).trim() : null,
+        day ? String(day).slice(0, 10) : new Date().toISOString().slice(0, 10),
+        noteVal ? String(noteVal).trim() : null,
         req.staff.full_name
       );
     audit(req, 'accounting.expense', { entityType: 'expense', entityId: r.lastInsertRowid, detail: { title: String(title).trim(), amount: amt } });
-    res.status(201).json(db.prepare('SELECT * FROM expenses WHERE id = ?').get(r.lastInsertRowid));
+    res.status(201).json(mapExpenseRow(db.prepare('SELECT * FROM expenses WHERE id = ?').get(r.lastInsertRowid)));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create expense' });
@@ -4214,14 +4616,257 @@ app.delete('/ftm/:id', ftmGuards, (req, res) => {
   }
 });
 
-require('./attendanceScan')(app, db, { requireAuth, PORT });
+/* =========================
+   COACHES (frontend-compatible API)
+   The canonical table stores `name` / `default_share`; the UI uses
+   `full_name` / `commission_percent`. This layer maps between them.
+========================= */
+
+function coachApiShape(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    full_name: row.name || '',
+    phone: row.phone || null,
+    specialty: null,
+    commission_percent: Number(row.default_share) || 0,
+    notes: row.notes || null,
+    is_active: row.is_active ? 1 : 0,
+    created_at: row.created_at || null,
+    has_insurance: 0,
+    insurance_notes: null,
+    referrer_name: null,
+    referral_source: null,
+    training_goal: null,
+    photo_url: null,
+  };
+}
+
+function coachSportsMap() {
+  const map = {};
+  const rows = db.prepare('SELECT coach_id, sport FROM coach_sports ORDER BY sport').all();
+  for (const r of rows) {
+    if (!r.sport) continue;
+    (map[r.coach_id] ||= []).push(r.sport);
+  }
+  return map;
+}
+
+app.get('/coaches', requireAuth, (_req, res) => {
+  try {
+    const rows = db.prepare('SELECT * FROM coaches ORDER BY id DESC').all();
+    const sports = coachSportsMap();
+    res.json(rows.map((r) => ({
+      ...coachApiShape(r),
+      specialty: (sports[r.id] || []).join('، ') || null,
+    })));
+  } catch (err) {
+    console.error('GET /coaches', err);
+    res.status(500).json({ error: 'خطا در دریافت فهرست مربیان' });
+  }
+});
+
+app.get('/coaches/:id', requireAuth, (req, res) => {
+  try {
+    const row = db.prepare('SELECT * FROM coaches WHERE id = ?').get(Number(req.params.id));
+    if (!row) return res.status(404).json({ error: 'مربی پیدا نشد' });
+
+    const members = db.prepare(`
+      SELECT ms.member_id AS id, m.name AS full_name, m.phone AS phone, ms.sport AS sport
+      FROM member_sports ms
+      JOIN members m ON m.id = ms.member_id
+      WHERE ms.coach_id = ?
+      ORDER BY m.name
+    `).all(row.id);
+
+    const totalFee = Number(db.prepare(
+      'SELECT COALESCE(SUM(tuition_amount),0) AS s FROM member_sports WHERE coach_id = ?'
+    ).get(row.id).s) || 0;
+
+    const coachSports = db.prepare('SELECT sport FROM coach_sports WHERE coach_id = ? ORDER BY sport')
+      .all(row.id).map((r) => r.sport).filter(Boolean);
+
+    res.json({
+      ...coachApiShape(row),
+      specialty: coachSports.join('، ') || null,
+      members,
+      stats: {
+        member_count: members.length,
+        total_monthly_fee: totalFee,
+        total_commission: Math.round(totalFee * (Number(row.default_share) || 0) / 100),
+      },
+    });
+  } catch (err) {
+    console.error('GET /coaches/:id', err);
+    res.status(500).json({ error: 'خطا در دریافت اطلاعات مربی' });
+  }
+});
+
+app.post('/coaches', requireAuth, (req, res) => {
+  try {
+    const b = req.body || {};
+    const name = String(b.full_name || b.name || '').trim();
+    if (!name) return res.status(400).json({ error: 'نام مربی الزامی است' });
+
+    const phone = b.phone ? String(b.phone).trim() : null;
+    const share = Number(b.commission_percent ?? b.default_share ?? 0) || 0;
+    const notes = b.notes ? String(b.notes).trim() : null;
+    const isActive = b.is_active === undefined || b.is_active === null
+      ? 1
+      : (b.is_active ? 1 : 0);
+
+    const info = db.prepare(`
+      INSERT INTO coaches (name, phone, is_active, pay_model, default_share, monthly_salary, notes)
+      VALUES (?, ?, ?, 'share', ?, 0, ?)
+    `).run(name, phone, isActive, share, notes);
+
+    const row = db.prepare('SELECT * FROM coaches WHERE id = ?').get(info.lastInsertRowid);
+    audit(req, 'coach.create', { entityType: 'coach', entityId: row.id });
+    res.status(201).json(coachApiShape(row));
+  } catch (err) {
+    console.error('POST /coaches', err);
+    res.status(500).json({ error: 'خطا در ثبت مربی' });
+  }
+});
+
+app.put('/coaches/:id', requireAuth, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = db.prepare('SELECT * FROM coaches WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'مربی پیدا نشد' });
+
+    const b = req.body || {};
+    const name = String(b.full_name || b.name || existing.name || '').trim();
+    if (!name) return res.status(400).json({ error: 'نام مربی الزامی است' });
+
+    const phone = b.phone === undefined ? existing.phone : (b.phone ? String(b.phone).trim() : null);
+    const share = b.commission_percent === undefined && b.default_share === undefined
+      ? existing.default_share
+      : (Number(b.commission_percent ?? b.default_share) || 0);
+    const notes = b.notes === undefined ? existing.notes : (b.notes ? String(b.notes).trim() : null);
+    const isActive = b.is_active === undefined || b.is_active === null
+      ? existing.is_active
+      : (b.is_active ? 1 : 0);
+
+    db.prepare(`
+      UPDATE coaches
+      SET name = ?, phone = ?, is_active = ?, default_share = ?, notes = ?
+      WHERE id = ?
+    `).run(name, phone, isActive, share, notes, id);
+
+    const row = db.prepare('SELECT * FROM coaches WHERE id = ?').get(id);
+    audit(req, 'coach.update', { entityType: 'coach', entityId: id });
+    res.json(coachApiShape(row));
+  } catch (err) {
+    console.error('PUT /coaches/:id', err);
+    res.status(500).json({ error: 'خطا در ویرایش مربی' });
+  }
+});
+
+app.delete('/coaches/:id', requireAuth, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = db.prepare('SELECT * FROM coaches WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'مربی پیدا نشد' });
+
+    const refTables = [
+      'coach_sessions', 'coach_earnings', 'coach_settlements',
+      'coach_adjustments', 'payments', 'ftm_assessments', 'workout_programs',
+    ];
+    let hasHistory = false;
+    for (const t of refTables) {
+      const n = db.prepare(`SELECT COUNT(*) AS c FROM ${t} WHERE coach_id = ?`).get(id).c;
+      if (n > 0) { hasHistory = true; break; }
+    }
+
+    if (hasHistory) {
+      db.prepare('UPDATE coaches SET is_active = 0 WHERE id = ?').run(id);
+      audit(req, 'coach.deactivate', { entityType: 'coach', entityId: id });
+      return res.json({ ok: true, deactivated: true });
+    }
+
+    const tx = db.transaction(() => {
+      db.prepare('UPDATE member_sports SET coach_id = NULL, coach_name = NULL WHERE coach_id = ?').run(id);
+      db.prepare('DELETE FROM coach_sports WHERE coach_id = ?').run(id);
+      db.prepare('DELETE FROM coaches WHERE id = ?').run(id);
+    });
+    tx();
+    audit(req, 'coach.delete', { entityType: 'coach', entityId: id });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /coaches/:id', err);
+    res.status(500).json({ error: 'خطا در حذف مربی' });
+  }
+});
+
+/* =========================
+   SYSTEM — read-only subset used by Settings page.
+   Destructive routes (restore / updates / raw downloads) stay disabled.
+========================= */
+
+const APP_VERSION = '0.1.11';
+
+app.get('/system/version', requireAuth, (_req, res) => {
+  res.json({
+    version: APP_VERSION,
+    app: 'alpha-gym',
+    self_update_enabled: false,
+    node: process.version,
+    env: process.env.NODE_ENV || 'production',
+  });
+});
+
+app.get('/system/updates/check', requireAuth, (_req, res) => {
+  res.json({
+    local_version: APP_VERSION,
+    remote_version: null,
+    update_available: false,
+    self_update_enabled: false,
+    note: 'به‌روزرسانی خودکار در این نسخه غیرفعال است.',
+  });
+});
+
+app.get('/system/backup/stats', requireAuth, requireAdmin, (_req, res) => {
+  try {
+    const tables = {};
+    const rows = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
+    for (const t of rows) {
+      try { tables[t.name] = db.prepare(`SELECT COUNT(*) AS c FROM "${t.name}"`).get().c; }
+      catch { tables[t.name] = 0; }
+    }
+    res.json({ tables, photo_count: 0, app_version: APP_VERSION });
+  } catch (err) {
+    console.error('GET /system/backup/stats', err);
+    res.status(500).json({ error: 'خطا در آمار پشتیبان‌گیری' });
+  }
+});
+
+require('./attendanceScan')(app, db, { requireAuth, requireAdmin, PORT });
+require('./personnelAttendance')(app, db, { requireAuth, requireAdmin, audit });
 require('./statsPublic')(app, db);
+
+/* =========================
+   STATIC PANEL (standalone mode, no nginx required)
+========================= */
+
+if (fs.existsSync(SPA_INDEX)) {
+  app.use(express.static(STATIC_DIR, { index: false }));
+  app.get('*', (req, res, next) => {
+    if (req.isApiRequest || req.path.startsWith('/api')) return next();
+    res.sendFile(SPA_INDEX);
+  });
+  console.log(`[STATIC] panel served from ${STATIC_DIR}`);
+}
 
 /* =========================
    START SERVER
 ========================= */
 
-startCrons();
+if (process.env.DISABLE_CRON === '1') {
+  console.log('[CRON] disabled by DISABLE_CRON=1');
+} else {
+  startCrons();
+}
 
 app.listen(PORT, () => {
   console.log(`Alpha Gym API running at http://localhost:${PORT}`);

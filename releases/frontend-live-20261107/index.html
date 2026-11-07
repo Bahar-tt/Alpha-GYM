@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/v5.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <title>آلفا جیم | مدیریت باشگاه</title>
+    <meta name="theme-color" content="#f4f6fb" />
+    <script>
+      // Remove stale Service Workers/Cache Storage from older deployments.
+      // Deliberately preserve localStorage: the bearer token lives there.
+      (async function alphaGymCacheGuard() {
+        try {
+          var registrations = await navigator.serviceWorker.getRegistrations();
+          var cacheNames = await caches.keys();
+          var changed = registrations.length > 0 || cacheNames.length > 0;
+          await Promise.all(registrations.map(function (registration) { return registration.unregister(); }));
+          await Promise.all(cacheNames.map(function (cacheName) { return caches.delete(cacheName); }));
+          var reloadKey = 'alpha_gym_cache_guard_reload_v1';
+          if (changed && !sessionStorage.getItem(reloadKey)) {
+            sessionStorage.setItem(reloadKey, '1');
+            location.reload();
+          } else if (!changed) {
+            sessionStorage.removeItem(reloadKey);
+          }
+        } catch (error) {
+          console.warn('Alpha GYM cache guard skipped:', error);
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-DrE0iEfM.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-3tVARCpe.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
