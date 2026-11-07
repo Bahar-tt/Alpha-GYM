@@ -10,7 +10,7 @@ import {
   type CoachDetail,
 } from '../services/coachService';
 import { getApiErrorMessage } from '../lib/errors';
-import ProfileExtrasFields, { emptyExtras } from '../components/ProfileExtrasFields';
+import ProfileExtrasFields from '../components/ProfileExtrasFields';
 import PrintCardButton from '../components/PrintCardButton';
 import { SPORTS, sportLabel } from '../lib/sports';
 import {

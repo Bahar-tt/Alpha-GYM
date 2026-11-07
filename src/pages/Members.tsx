@@ -41,7 +41,6 @@ import {
   sportFee,
   sportLabel,
   matchCoachForSport,
-  matchSportForCoach,
   calcAgeFromBirthday,
   calcBmi,
   bmiLabel,
@@ -631,7 +630,7 @@ export default function Members() {
                     {profileReceipts.map((r) => (
                       <li key={r.id} className="text-sm flex justify-between gap-2" style={{ color: 'var(--text-secondary)' }}>
                         <span>{r.type} — {Number(r.amount || 0).toLocaleString('fa-IR')} تومان</span>
-                        <a href={receiptPublicUrl(r.public_token)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1" style={{ color: 'var(--accent)' }}><ExternalLink size={12} /> مشاهده</a>
+                        <a href={receiptPublicUrl(r.token)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1" style={{ color: 'var(--accent)' }}><ExternalLink size={12} /> مشاهده</a>
                       </li>
                     ))}
                   </ul>
@@ -651,15 +650,15 @@ export default function Members() {
             </div>
             <MembershipCard
               data={{
-                fullName: cardTarget.full_name,
-                fatherName: cardTarget.father_name || '',
-                nationalId: cardTarget.national_id || '',
-                personnelCode: cardTarget.personnel_code || '',
+                full_name: cardTarget.full_name,
+                father_name: cardTarget.father_name || '',
+                national_id: cardTarget.national_id || '',
+                personnel_code: cardTarget.personnel_code || '',
                 birthday: cardTarget.birthday || '',
-                membershipType: membershipLabels[cardTarget.membership_type] || cardTarget.membership_type,
-                endDate: formatJalali(cardTarget.end_date),
-                coachName: cardTarget.coach_name || '',
-                photoUrl: cardTarget.photo_url || '',
+                membership_type: membershipLabels[cardTarget.membership_type] || cardTarget.membership_type,
+                end_date: cardTarget.end_date,
+                coach_name: cardTarget.coach_name || '',
+                photo_url: cardTarget.photo_url || '',
                 role: 'member',
               }}
             />

@@ -48,17 +48,17 @@ function UserModal({ editTarget, onClose }: UserModalProps) {
   const [error,        setError]        = useState('');
   const [loading,      setLoading]      = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
     if (isEdit) {
       // In edit mode we only update the role (username/password change = separate flow)
-      const { error: err } = updateUserRole(editTarget!.id, role);
+      const { error: err } = await updateUserRole(editTarget!.id, role);
       if (err) { setError(err); setLoading(false); return; }
     } else {
-      const { error: err } = createUser({ username, password, full_name: fullName, role });
+      const { error: err } = await createUser({ username, password, full_name: fullName, role });
       if (err) { setError(err); setLoading(false); return; }
     }
 
@@ -192,8 +192,8 @@ function DeleteConfirm({ target, onClose }: { target: ManagedUser; onClose: () =
   const { deleteUser } = useAuth();
   const [error, setError] = useState('');
 
-  const handleDelete = () => {
-    const { error: err } = deleteUser(target.id);
+  const handleDelete = async () => {
+    const { error: err } = await deleteUser(target.id);
     if (err) { setError(err); return; }
     onClose();
   };
@@ -295,7 +295,7 @@ export default function UsersPage() {
                     <RoleBadge role={u.role} />
                   </td>
                   <td className="px-6 py-4 text-xs text-gray-500">
-                    {new Date(u.created_at).toLocaleDateString('fa-IR')}
+                    {u.created_at ? new Date(u.created_at).toLocaleDateString('fa-IR') : '—'}
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">

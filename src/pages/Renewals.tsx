@@ -54,6 +54,7 @@ export default function Renewals() {
   const [amount, setAmount] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [lastReceiptUrl, setLastReceiptUrl] = useState('');
+  const [actionError, setActionError] = useState('');
 
   useEffect(() => {
     load();
@@ -113,6 +114,7 @@ export default function Renewals() {
 
   const handleApprove = async () => {
     if (!approveTarget) return;
+    setActionError('');
     setSubmitting(true);
     const opt = MONTH_OPTIONS.find((o) => o.months === selectedMonths) || MONTH_OPTIONS[0];
     const newEnd = addMonthsToIso(approveTarget.end_date, selectedMonths);
@@ -122,6 +124,14 @@ export default function Renewals() {
       months: selectedMonths,
       membership_type: opt.type,
     });
+
+    if (result.error) {
+      const value = result.error as unknown;
+      const message = typeof value === 'string' ? value : (value as { message?: string })?.message;
+      setActionError(message || 'تمدید انجام نشد');
+      setSubmitting(false);
+      return;
+    }
 
     const receiptToken =
       result.data && typeof result.data === 'object' && 'receipt' in result.data
@@ -161,6 +171,11 @@ export default function Renewals() {
         <h1 className="page-title">تمدید عضویت</h1>
         <p className="page-subtitle">اعضای منقضی — تأیید تمدید با صدور فیش آنلاین</p>
       </div>
+      {actionError && (
+        <div className="p-3 rounded-xl text-sm" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }} role="alert">
+          {actionError}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="stat-card">

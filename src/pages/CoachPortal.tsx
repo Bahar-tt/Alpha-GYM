@@ -5,7 +5,6 @@ import { getMembers, isMemberActive, type MemberRecord } from '../services/membe
 import { getCoaches, type Coach } from '../services/coachService';
 import {
   jalaliToGregorianIso,
-  gregorianToJalali,
   todayJalali,
   formatJalali,
   type JalaliDate,

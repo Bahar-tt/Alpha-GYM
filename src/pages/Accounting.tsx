@@ -11,7 +11,6 @@ import { getCoaches, type Coach } from '../services/coachService';
 import {
   Wallet,
   TrendingUp,
-  Users,
   Percent,
   ArrowDownCircle,
   ArrowUpCircle,

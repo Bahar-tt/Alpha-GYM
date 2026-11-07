@@ -1,13 +1,35 @@
 /**
- * API base URL:
- * - Production (Docker): empty → same origin (works on ANY domain: runflare, custom, http/https)
- * - Local dev: set VITE_API_URL=http://localhost:8000
+ * All production API calls use the same-origin /api prefix. Nginx strips the
+ * prefix before forwarding to the Node process; Vite rewrites it in dev.
  */
 const raw = import.meta.env.VITE_API_URL as string | undefined;
-const API_BASE =
-  typeof raw === 'string' && raw.trim().length > 0
-    ? raw.trim().replace(/\/$/, '')
-    : ''; // relative → works with every host/domain
+export const API_BASE = (import.meta.env.PROD ? '/api' : raw?.trim() || '/api').replace(/\/$/, '');
+const TOKEN_KEY = 'alpha_gym_token';
+
+export function getToken(): string | null {
+  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+}
+
+export function setToken(token: string | null): void {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch { /* storage may be unavailable */ }
+}
+
+function authHeaders(json = false): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (json) headers['Content-Type'] = 'application/json';
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
+function handleUnauthorized(res: Response): void {
+  if (res.status !== 401) return;
+  setToken(null);
+  window.dispatchEvent(new CustomEvent('alpha-gym-unauthorized'));
+}
 
 export interface ApiMember {
   id: number;
@@ -42,22 +64,13 @@ export interface ApiMember {
 async function readBody(res: Response): Promise<unknown> {
   const text = await res.text();
   if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
+  try { return JSON.parse(text); } catch { return text; }
 }
 
 function errorMessage(body: unknown, fallback: string): string {
   if (body && typeof body === 'object') {
     const o = body as { error?: unknown; detail?: unknown; message?: unknown };
-    const main =
-      typeof o.error === 'string'
-        ? o.error
-        : typeof o.message === 'string'
-          ? o.message
-          : null;
+    const main = typeof o.error === 'string' ? o.error : typeof o.message === 'string' ? o.message : null;
     const detail = typeof o.detail === 'string' ? o.detail : null;
     if (main && detail) return `${main}: ${detail}`;
     if (main) return main;
@@ -66,25 +79,14 @@ function errorMessage(body: unknown, fallback: string): string {
   return fallback;
 }
 
-export async function apiGet<T>(path: string): Promise<{ data: T | null; error: string | null }> {
-  try {
-    const res = await fetch(`${API_BASE}${path}`);
-    const body = await readBody(res);
-    if (!res.ok) return { data: null, error: errorMessage(body, res.statusText) };
-    return { data: body as T, error: null };
-  } catch (err) {
-    return { data: null, error: err instanceof Error ? err.message : 'Network error' };
-  }
-}
-
-export async function apiPost<T>(path: string, payload: unknown): Promise<{ data: T | null; error: string | null }> {
+async function request<T>(path: string, init: RequestInit = {}): Promise<{ data: T | null; error: string | null }> {
   try {
     const res = await fetch(`${API_BASE}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      ...init,
+      headers: { ...authHeaders(Boolean(init.body)), ...(init.headers || {}) },
     });
     const body = await readBody(res);
+    handleUnauthorized(res);
     if (!res.ok) return { data: null, error: errorMessage(body, res.statusText) };
     return { data: body as T, error: null };
   } catch (err) {
@@ -92,30 +94,13 @@ export async function apiPost<T>(path: string, payload: unknown): Promise<{ data
   }
 }
 
-export async function apiPut<T>(path: string, payload: unknown): Promise<{ data: T | null; error: string | null }> {
-  try {
-    const res = await fetch(`${API_BASE}${path}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const body = await readBody(res);
-    if (!res.ok) return { data: null, error: errorMessage(body, res.statusText) };
-    return { data: body as T, error: null };
-  } catch (err) {
-    return { data: null, error: err instanceof Error ? err.message : 'Network error' };
-  }
+export function apiGet<T>(path: string) { return request<T>(path); }
+export function apiPost<T>(path: string, payload: unknown) {
+  return request<T>(path, { method: 'POST', body: JSON.stringify(payload) });
 }
-
-export async function apiDelete(path: string): Promise<{ error: string | null }> {
-  try {
-    const res = await fetch(`${API_BASE}${path}`, { method: 'DELETE' });
-    const body = await readBody(res);
-    if (!res.ok) return { error: errorMessage(body, res.statusText) };
-    return { error: null };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Network error' };
-  }
+export function apiPut<T>(path: string, payload: unknown) {
+  return request<T>(path, { method: 'PUT', body: JSON.stringify(payload) });
 }
-
-export { API_BASE };
+export function apiDelete(path: string) {
+  return request<unknown>(path, { method: 'DELETE' }).then(({ error }) => ({ error }));
+}

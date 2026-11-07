@@ -22,9 +22,17 @@ This repository was synced from the LIVE server state on 2026-11-07.
   - assets/index-3tVARCpe.css (md5 ce1315ea3a2f21e218a356ca897b8d29)
 
 ## Known divergence (topic for future cleanup)
-- repo src/ (Oct 26) does NOT match the deployed bundle's source. Before the
-  next frontend deployment, the freshest source tree must be located and added
-  to the repo; otherwise rebuilding from src/ will LOSE Nov 6-7 UI changes.
+- The LIVE bundle (index-DrE0iEfM.js, deployed Nov 7) was built from a source
+  tree that is NOT on this server; the closest source available is the Nov 5
+  release snapshot at /var/www/alphagym-release-48034d0 (== e369c09 == df615f2,
+  all three identical, dist index-Do-KK75l.js).
+- In the follow-up commit the freshest found source (Nov 5 release) was synced
+  into src/ (9 files: AuthContext, Accounting, Coaches, CoachPortal, Members,
+  Messaging, Renewals, Users, services/api.ts).
+- Therefore src/ may still lag the deployed bundle slightly (Nov 6-7 dist-only
+  patches: modern login tweaks, login coach fix, whitefix, coaches fix).
+  Locate the true Nov-7 build source before the next full rebuild; otherwise
+  rebuilding from src/ can partially regress those Nov 6-7 UI changes.
 
 ## Backups on server
 - Repo backup before this sync: /var/backups/alpha-gym/repo-before-sync-20261107_120208.tar.gz

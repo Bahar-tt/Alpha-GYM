@@ -293,7 +293,12 @@ export default function Messaging() {
                 <label className="block text-sm text-gray-400 mb-1.5">گیرنده</label>
                 <select
                   value={form.recipient_type}
-                  onChange={(e) => setForm({ ...form, recipient_type: e.target.value as any })}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value === 'all' || value === 'expiring' || value === 'individual' || value === 'coaches') {
+                      setForm({ ...form, recipient_type: value });
+                    }
+                  }}
                   className="input-dark"
                 >
                   <option value="all">همه اعضا</option>
