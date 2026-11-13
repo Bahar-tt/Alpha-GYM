@@ -37,3 +37,19 @@ This repository was synced from the LIVE server state on 2026-11-07.
 ## Backups on server
 - Repo backup before this sync: /var/backups/alpha-gym/repo-before-sync-20261107_120208.tar.gz
 - Multiple frontend-before-* dir backups exist in /var/www/alphagym/
+
+## 2026-11-13 — Pending cloud deploy: member two-way sync
+- Repo `backend/attendanceScan.js` gained `POST /agent/member` (agent-authenticated,
+  idempotent upsert keyed by `(device_id, client_uid)`) and the `/agent/sync` members
+  query now returns `client_uid` (via new `agent_member_map` table).
+- Repo `backend/server.js` gained `PRAGMA journal_mode=WAL` + `busy_timeout=5000`
+  after DB open (guarded) — needed for the on-prem server+bridge sharing gym.db;
+  optional on the cloud.
+- Deploy bundle: `C:\Users\KEYHAN\Downloads\alpha-gym-cloud-update-20261113.tar.gz`
+  + `deploy-cloud-update.sh` (backup, syntax check, pm2 restart, health check,
+  auto-rollback). Target: `/var/www/alphagym/backend` (pm2 `alphagym-api`).
+- NOT YET DEPLOYED: SSH to 78.157.51.176 is currently refused (server closes the
+  connection right after our SSH version banner; TCP 22 open). Until deployed, the
+  on-prem bridge retries `POST /agent/member` every 30 min and gets 404.
+- Also pending (from earlier): set `ADMIN_PHONE=09120739032`, full `gym.db` seed from
+  live, deploy patched frontend bundle (`index-DrE0iEfM.js`).

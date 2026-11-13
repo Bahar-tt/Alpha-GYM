@@ -131,6 +131,20 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
     db.exec('CREATE INDEX IF NOT EXISTS idx_members_legacy ON members (legacy_person_id)');
   } catch (_e) { /* ignore */ }
 
+  // نگاشت اعضایی که روی «سرور محلی پذیرش» ساخته شده‌اند به عضو متناظر در ابر.
+  // کلید: (شناسهٔ دستگاه، شناسهٔ یکتای سمت محلی). باعث idempotent شدن ارسال می‌شود.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS agent_member_map (
+      device_id  TEXT NOT NULL,
+      client_uid TEXT NOT NULL,
+      member_id  INTEGER NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (device_id, client_uid)
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_member_map_member ON agent_member_map (member_id);
+  `);
+
   /* ------------------------------------------------------------------ *
    *  HELPERS
    * ------------------------------------------------------------------ */
@@ -974,9 +988,12 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
         ).run(deviceId, deviceId);
       }
       const members = db.prepare(
-        `SELECT id, name, phone, member_code, legacy_person_id, expiry_date, start_date, membership_type
-         FROM members ORDER BY id`
-      ).all();
+        `SELECT m.id, m.name, m.phone, m.member_code, m.legacy_person_id,
+                m.expiry_date, m.start_date, m.membership_type,
+                (SELECT amm.client_uid FROM agent_member_map amm
+                  WHERE amm.member_id = m.id AND amm.device_id = ? LIMIT 1) AS client_uid
+         FROM members m ORDER BY m.id`
+      ).all(deviceId || '');
       const credentials = db.prepare(
         `SELECT member_id, kind, value FROM member_credentials WHERE is_active = 1`
       ).all();
@@ -1000,6 +1017,140 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
     } catch (e) {
       console.error('[agent/sync]', e);
       res.status(500).json({ ok: false, error: 'sync failed' });
+    }
+  });
+
+  /* ------------------------------------------------------------------ *
+   *  AGENT -> CLOUD member upsert
+   *  Used by the on-premise server to push members that were created on
+   *  the gym PC (possibly while it was offline). Idempotent: the same
+   *  client_uid always resolves to the same cloud member.
+   * ------------------------------------------------------------------ */
+  function nextMemberCodeCloud() {
+    const row = db.prepare(
+      "SELECT COALESCE(MAX(CAST(member_code AS INTEGER)), 0) + 1 AS next FROM members WHERE member_code GLOB '[0-9]*'"
+    ).get();
+    return String(Number(row && row.next) || 1);
+  }
+
+  app.post('/agent/member', agentAuth, (req, res) => {
+    try {
+      const b = req.body || {};
+      const deviceId = String(b.device_id || '').trim() || 'onprem';
+      const clientUid = String(b.client_uid || '').trim();
+      if (!clientUid) return res.status(400).json({ ok: false, error: 'client_uid is required' });
+
+      const name = String(b.name || '').trim();
+      if (!name) return res.status(400).json({ ok: false, error: 'name is required' });
+      const phone = String(b.phone || '').trim();
+      const sports = Array.isArray(b.sports) ? b.sports : [];
+      const nowFn = "datetime('now')";
+
+      let memberId = null;
+      let created = false;
+
+      const mapped = db.prepare(
+        'SELECT member_id FROM agent_member_map WHERE device_id = ? AND client_uid = ?'
+      ).get(deviceId, clientUid);
+      if (mapped && db.prepare('SELECT id FROM members WHERE id = ?').get(mapped.member_id)) {
+        memberId = Number(mapped.member_id);
+      }
+
+      const tx = db.transaction(() => {
+        if (memberId) {
+          db.prepare(
+            `UPDATE members SET name = ?, phone = ?,
+               member_code = COALESCE(NULLIF(?, ''), member_code),
+               legacy_person_id = COALESCE(NULLIF(?, ''), legacy_person_id),
+               expiry_date = COALESCE(NULLIF(?, ''), expiry_date),
+               start_date = COALESCE(NULLIF(?, ''), start_date),
+               membership_type = COALESCE(NULLIF(?, ''), membership_type),
+               updated_by = 'on-prem', updated_at = datetime('now')
+             WHERE id = ?`
+          ).run(
+            name, phone,
+            b.member_code != null ? String(b.member_code) : '',
+            b.legacy_person_id != null ? String(b.legacy_person_id) : '',
+            b.expiry_date || '', b.start_date || '', b.membership_type || '',
+            memberId
+          );
+          return;
+        }
+
+        // No mapping yet → this member was created on the local panel. Insert it.
+        // Honor the local id when it is free so both databases stay aligned
+        // (attendance forwarding keeps working without a remap).
+        const preferred = Number(b.preferred_id);
+        const canUsePreferred = Number.isInteger(preferred) && preferred > 0 &&
+          !db.prepare('SELECT id FROM members WHERE id = ?').get(preferred);
+
+        // Use the local member_code only when it is free; on a collision allocate
+        // a fresh code (never clobber a different member that already owns it).
+        let code = b.member_code != null && String(b.member_code).trim() !== '' ? String(b.member_code).trim() : null;
+        if (code && db.prepare('SELECT id FROM members WHERE member_code = ?').get(code)) code = null;
+        const resolvedCode = code || nextMemberCodeCloud();
+        const expiry = b.expiry_date ? String(b.expiry_date) : '';
+
+        let info;
+        if (canUsePreferred) {
+          info = db.prepare(
+            `INSERT INTO members (id, name, phone, member_code, legacy_person_id, expiry_date, start_date, membership_type, created_by, updated_by, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'on-prem', 'on-prem', ${nowFn})`
+          ).run(preferred, name, phone, resolvedCode,
+                b.legacy_person_id != null ? String(b.legacy_person_id) : null,
+                expiry, b.start_date || null, b.membership_type || 'monthly');
+        } else {
+          info = db.prepare(
+            `INSERT INTO members (name, phone, member_code, legacy_person_id, expiry_date, start_date, membership_type, created_by, updated_by, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'on-prem', 'on-prem', ${nowFn})`
+          ).run(name, phone, resolvedCode,
+                b.legacy_person_id != null ? String(b.legacy_person_id) : null,
+                expiry, b.start_date || null, b.membership_type || 'monthly');
+        }
+        memberId = Number(info.lastInsertRowid);
+        created = true;
+      });
+      tx();
+
+      // Sports: replace this member's rows with the pushed list (idempotent).
+      if (sports.length) {
+        const replaceSports = db.transaction(() => {
+          db.prepare('DELETE FROM member_sports WHERE member_id = ?').run(memberId);
+          const insSport = db.prepare(
+            `INSERT INTO member_sports
+               (member_id, sport, sport_plan_key, weekly_sessions, total_sessions, used_sessions,
+                tuition_amount, fee_basis, class_type, start_date, expiry_date)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          );
+          for (const s of sports) {
+            insSport.run(
+              memberId,
+              s.sport ? String(s.sport) : '',
+              s.sport_plan_key || null,
+              Number(s.weekly_sessions) || 0,
+              Number(s.total_sessions) || 0,
+              Number(s.used_sessions) || 0,
+              s.tuition_amount != null ? Number(s.tuition_amount) : null,
+              s.fee_basis || null,
+              s.class_type || null,
+              s.start_date || b.start_date || null,
+              s.expiry_date || b.expiry_date || ''
+            );
+          }
+        });
+        replaceSports();
+      }
+
+      db.prepare(
+        `INSERT INTO agent_member_map (device_id, client_uid, member_id, updated_at)
+         VALUES (?, ?, ?, datetime('now'))
+         ON CONFLICT(device_id, client_uid) DO UPDATE SET member_id = excluded.member_id, updated_at = datetime('now')`
+      ).run(deviceId, clientUid, memberId);
+
+      res.json({ ok: true, member_id: memberId, created });
+    } catch (e) {
+      console.error('[agent/member]', e);
+      res.status(500).json({ ok: false, error: (e && e.message) || 'member upsert failed' });
     }
   });
 

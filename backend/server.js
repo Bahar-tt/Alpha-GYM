@@ -104,6 +104,13 @@ app.use((req, res, next) => {
 });
 
 const db = new Database(DB_PATH);
+// چند اتصال هم‌زمان به دیتابیس (سرور + پل ابری سرور محلی) → حالت WAL و انتظار برای قفل
+try {
+  if (typeof db.pragma === 'function') {
+    db.pragma('journal_mode = WAL');
+    db.pragma('busy_timeout = 5000');
+  }
+} catch (_e) { /* روی درایورهای دیگر نادیده گرفته می‌شود */ }
 
 /* =========================
    DATABASE SCHEMA
