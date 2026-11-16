@@ -1,17 +1,23 @@
-const XLSX = require('xlsx');
-const Database = require('../sqlite-wrapper');
+const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
 
-function generateMembersExcel(db) {
+async function generateMembersExcel(db) {
   const rows = db.prepare('SELECT * FROM members ORDER BY id').all();
-  const sheet = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, sheet, 'members');
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('members');
+
+  if (rows.length > 0) {
+    sheet.columns = Object.keys(rows[0]).map((key) => ({ header: key, key }));
+    rows.forEach((row) => sheet.addRow(row));
+  }
+  sheet.getRow(1).font = { bold: true };
+  sheet.views = [{ state: 'frozen', ySplit: 1 }];
+
   const outDir = path.join(__dirname, '..', 'exports');
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   const outPath = path.join(outDir, `members-${Date.now()}.xlsx`);
-  XLSX.writeFile(wb, outPath);
+  await workbook.xlsx.writeFile(outPath);
   return outPath;
 }
 

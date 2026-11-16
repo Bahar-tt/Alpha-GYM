@@ -961,12 +961,14 @@ app.post('/provider/feature', (req, res) => {
   if (!valid.includes(feature)) {
     return res.status(400).json({ error: 'ویژگی نامعتبر است' });
   }
-  db.prepare(`UPDATE feature_flags SET enabled = ?, updated_at = datetime('now') WHERE key = ?`)
-    .run(enabled ? 1 : 0, feature);
-  audit(req, 'provider.feature_update', {
-    entityType: 'feature_flag',
-    detail: { feature, enabled: !!enabled },
-  });
+  db.transaction(() => {
+    db.prepare(`UPDATE feature_flags SET enabled = ?, updated_at = datetime('now') WHERE key = ?`)
+      .run(enabled ? 1 : 0, feature);
+    audit(req, 'provider.feature_update', {
+      entityType: 'feature_flag',
+      detail: { feature, enabled: !!enabled },
+    });
+  })();
   res.json({ ok: true, feature, enabled: !!enabled });
 });
 
@@ -1887,48 +1889,51 @@ app.post('/members', requireAuth, (req, res) => {
       return memberId;
     });
 
-    const memberId = createMember();
-    const actor = req.staff ? req.staff.full_name : 'سیستم';
-    db.prepare(`UPDATE members SET created_by = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?`)
-      .run(actor, actor, memberId);
-
-    // 💰 ثبت پرداخت ثبت‌نام (درآمد)
-    const totalTuition = entries.reduce((s, e) => s + (Number(e.tuition_amount) || 0), 0);
-    const primarySport = entries.map((e) => e.sport).filter(Boolean).join('، ') || null;
-    recordPayment({
-      member_id: memberId,
-      member_name: normalizeName(name),
-      sport: primarySport,
-      amount: totalTuition,
-      type: 'registration',
-      received_by: actor,
+    const registerMember = db.transaction(() => {
+      const memberId = createMember();
+      const actor = req.staff ? req.staff.full_name : 'سیستم';
+      db.prepare(`UPDATE members SET created_by = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?`)
+        .run(actor, actor, memberId);
+      const totalTuition = entries.reduce((s, e) => s + (Number(e.tuition_amount) || 0), 0);
+      const primarySport = entries.map((e) => e.sport).filter(Boolean).join('، ') || null;
+      const payment = recordPayment({
+        member_id: memberId,
+        member_name: normalizeName(name),
+        sport: primarySport,
+        amount: totalTuition,
+        type: 'registration',
+        received_by: actor,
+      });
+      const row = memberWithSports(memberId);
+      const receipt = createReceipt({
+        member_id: memberId,
+        member_name: row.name,
+        phone: row.phone,
+        type: 'registration',
+        amount: totalTuition,
+        months: 0,
+        membership_type: row.membership_type,
+        description: 'ثبت‌نام / شروع عضویت',
+        period_start: row.start_date || null,
+        period_end: row.expiry_date || null,
+      });
+      audit(req, 'member.create', {
+        entityType: 'member', entityId: memberId, memberId,
+        detail: { name: row.name, phone: row.phone, sports: (row.sports || []).map((s) => s.sport) },
+      });
+      if (payment) audit(req, 'payment.create', {
+        entityType: 'payment', entityId: payment.id, memberId,
+        detail: { amount: totalTuition, type: 'registration', receipt_id: receipt.id },
+      });
+      audit(req, 'receipt.create', {
+        entityType: 'receipt', entityId: receipt.id, memberId,
+        detail: { amount: receipt.amount, type: receipt.type, payment_id: payment ? payment.id : null },
+      });
+      return { row, receipt };
     });
-
-    const row = memberWithSports(memberId);
-
-    // 🧾 فیش ثبت‌نام (لینک عمومی برای پیامک / چاپ)
-    const receipt = createReceipt({
-      member_id: memberId,
-      member_name: row.name,
-      phone: row.phone,
-      type: 'registration',
-      amount: totalTuition,
-      months: 0,
-      membership_type: row.membership_type,
-      description: 'ثبت‌نام / شروع عضویت',
-      period_start: row.start_date || null,
-      period_end: row.expiry_date || null,
-    });
-
-    // 🔥 EVENT SYSTEM
+    const { row, receipt } = registerMember();
+    // رویدادهای بیرونی پس از commit اجرا می‌شوند تا rollback مالی را مختل نکنند.
     onMemberCreated(row);
-
-    audit(req, 'member.create', {
-      entityType: 'member',
-      entityId: memberId,
-      memberId,
-      detail: { name: row.name, phone: row.phone, sports: (row.sports || []).map((s) => s.sport) },
-    });
 
     res.status(201).json({ ...row, receipt });
   } catch (err) {
@@ -2110,45 +2115,54 @@ app.put('/members/:id', requireAuth, (req, res) => {
         const mtype = row.membership_type || (membership_type ? String(membership_type).trim() : null);
         const firstSport = (row.sports || []).find((s) => String(s.sport || '').trim() !== '') || null;
 
-        db.prepare(`
-          INSERT INTO renewals
-            (member_id, sport_id, membership_type, old_end_date, new_end_date, amount, status, renewed_by)
-          VALUES (?, ?, ?, ?, ?, ?, 'completed', ?)
-        `).run(
-          id,
-          firstSport ? firstSport.id : null,
-          mtype,
-          oldEnd,
-          newEnd,
-          amount,
-          actor
-        );
-
-        if (amount > 0) {
-          recordPayment({
+        const createRenewalArtifacts = db.transaction(() => {
+          const renewalResult = db.prepare(`
+            INSERT INTO renewals
+              (member_id, sport_id, membership_type, old_end_date, new_end_date, amount, status, renewed_by)
+            VALUES (?, ?, ?, ?, ?, ?, 'completed', ?)
+          `).run(id, firstSport ? firstSport.id : null, mtype, oldEnd, newEnd, amount, actor);
+          const renewalRow = db.prepare('SELECT * FROM renewals WHERE id = ?').get(renewalResult.lastInsertRowid);
+          let payment = null;
+          if (amount > 0) {
+            payment = recordPayment({
+              member_id: id,
+              member_name: row.name,
+              sport: firstSport ? firstSport.sport : null,
+              amount,
+              type: 'renewal',
+              received_by: actor,
+            });
+          }
+          const newReceipt = createReceipt({
             member_id: id,
             member_name: row.name,
-            sport: firstSport ? firstSport.sport : null,
-            amount,
+            phone: row.phone,
             type: 'renewal',
-            received_by: actor,
+            amount,
+            months,
+            membership_type: mtype,
+            description: 'تمدید عضویت',
+            period_start: oldEnd,
+            period_end: newEnd,
           });
-        }
-
-        receipt = createReceipt({
-          member_id: id,
-          member_name: row.name,
-          phone: row.phone,
-          type: 'renewal',
-          amount,
-          months,
-          membership_type: mtype,
-          description: 'تمدید عضویت',
-          period_start: oldEnd,
-          period_end: newEnd,
+          audit(req, 'renewal.create', {
+            entityType: 'renewal', entityId: renewalRow.id, memberId: id,
+            detail: { amount, old_end_date: oldEnd, new_end_date: newEnd, payment_id: payment ? payment.id : null, receipt_id: newReceipt.id },
+          });
+          if (payment) audit(req, 'payment.create', {
+            entityType: 'payment', entityId: payment.id, memberId: id,
+            detail: { amount, type: 'renewal', renewal_id: renewalRow.id, receipt_id: newReceipt.id },
+          });
+          audit(req, 'receipt.create', {
+            entityType: 'receipt', entityId: newReceipt.id, memberId: id,
+            detail: { amount, type: 'renewal', payment_id: payment ? payment.id : null },
+          });
+          return newReceipt;
         });
+        receipt = createRenewalArtifacts();
       } catch (renewErr) {
         console.error('[renewal]', renewErr);
+        throw renewErr;
       }
     }
 
@@ -2392,51 +2406,59 @@ app.post('/renewals', requireAuth, (req, res) => {
 
   try {
     const actor = req.staff ? req.staff.full_name : (renewed_by ? String(renewed_by).trim() : null);
-    const result = db
-      .prepare(`
-        INSERT INTO renewals (member_id, sport_id, membership_type, old_end_date, new_end_date, amount, status, renewed_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-      .run(
-        Number(member_id),
-        sport_id != null ? Number(sport_id) : null,
-        membership_type ? String(membership_type).trim() : 'monthly',
-        old_end_date ? String(old_end_date).trim() : null,
-        new_end_date ? String(new_end_date).trim() : null,
-        amount != null && amount !== '' ? Number(amount) : 0,
-        status ? String(status).trim() : 'completed',
-        actor
-      );
-
-    const row = db.prepare('SELECT * FROM renewals WHERE id = ?').get(result.lastInsertRowid);
-
-    // 💰 ثبت پرداخت تمدید (درآمد)
-    if (Number(row.amount) > 0) {
-      const member = db.prepare('SELECT name FROM members WHERE id = ?').get(Number(member_id));
-      const sportInfo = sport_id != null
-        ? db.prepare('SELECT sport FROM member_sports WHERE id = ?').get(Number(sport_id))
-        : null;
-      recordPayment({
-        member_id: Number(member_id),
-        member_name: member ? member.name : null,
-        sport: sportInfo ? sportInfo.sport : null,
-        amount: row.amount,
-        type: 'renewal',
-        received_by: actor,
+    const createRenewal = db.transaction(() => {
+      const result = db
+        .prepare(`
+          INSERT INTO renewals (member_id, sport_id, membership_type, old_end_date, new_end_date, amount, status, renewed_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+        .run(
+          Number(member_id),
+          sport_id != null ? Number(sport_id) : null,
+          membership_type ? String(membership_type).trim() : 'monthly',
+          old_end_date ? String(old_end_date).trim() : null,
+          new_end_date ? String(new_end_date).trim() : null,
+          amount != null && amount !== '' ? Number(amount) : 0,
+          status ? String(status).trim() : 'completed',
+          actor
+        );
+      const row = db.prepare('SELECT * FROM renewals WHERE id = ?').get(result.lastInsertRowid);
+      let payment = null;
+      if (Number(row.amount) > 0) {
+        const member = db.prepare('SELECT name FROM members WHERE id = ?').get(Number(member_id));
+        const sportInfo = sport_id != null
+          ? db.prepare('SELECT sport FROM member_sports WHERE id = ?').get(Number(sport_id))
+          : null;
+        payment = recordPayment({
+          member_id: Number(member_id),
+          member_name: member ? member.name : null,
+          sport: sportInfo ? sportInfo.sport : null,
+          amount: row.amount,
+          type: 'renewal',
+          received_by: actor,
+        });
+        audit(req, 'payment.create', {
+          entityType: 'payment',
+          entityId: payment.id,
+          memberId: Number(member_id),
+          detail: { amount: row.amount, type: 'renewal', renewal_id: row.id },
+        });
+      }
+      audit(req, 'renewal.create', {
+        entityType: 'renewal',
+        entityId: row.id,
+        memberId: Number(member_id),
+        detail: {
+          amount: row.amount,
+          old_end_date: row.old_end_date,
+          new_end_date: row.new_end_date,
+          sport_id: row.sport_id,
+          payment_id: payment ? payment.id : null,
+        },
       });
-    }
-
-    audit(req, 'renewal.create', {
-      entityType: 'renewal',
-      entityId: row.id,
-      memberId: Number(member_id),
-      detail: {
-        amount: row.amount,
-        old_end_date: row.old_end_date,
-        new_end_date: row.new_end_date,
-        sport_id: row.sport_id,
-      },
+      return row;
     });
+    const row = createRenewal();
     res.status(201).json(row);
   } catch (err) {
     console.error(err);
@@ -2497,11 +2519,11 @@ app.get('/members/export/meta', requireAuth, (_req, res) => {
   }
 });
 
-app.get('/members/export', requireAuth, (_req, res) => {
+app.get('/members/export', requireAuth, async (_req, res) => {
   try {
     let file = latestExportPath();
     if (!file) {
-      generateMembersExcel();
+      await generateMembersExcel(db);
       file = latestExportPath();
     }
     if (!file) {
@@ -2770,32 +2792,34 @@ app.post('/accounting/payments', accountingGuards, (req, res) => {
     const member = member_id ? db.prepare('SELECT id, name FROM members WHERE id = ?').get(Number(member_id)) : null;
     const allowedTypes = ['registration', 'renewal', 'manual', 'fee', 'other', 'member_fee', 'coach_payout'];
     const typeStr = allowedTypes.includes(String(type)) ? String(type) : 'manual';
-    const created = recordPayment({
-      member_id: member ? member.id : (member_id != null && member_id !== '' ? Number(member_id) : null),
-      member_name: member ? member.name : (member_name ? String(member_name).trim() : null),
-      sport: sport ? String(sport).trim() : null,
-      amount: amt,
-      type: typeStr,
-      method: ['cash', 'card', 'transfer', 'pos', 'other'].includes(String(method)) ? String(method) : 'cash',
-      note: note ? String(note).trim() : null,
-      received_by: req.staff.full_name,
-      created_at: date ? `${String(date).slice(0, 10)} ${new Date().toISOString().slice(11, 19)}` : undefined,
+    const createPayment = db.transaction(() => {
+      const created = recordPayment({
+        member_id: member ? member.id : (member_id != null && member_id !== '' ? Number(member_id) : null),
+        member_name: member ? member.name : (member_name ? String(member_name).trim() : null),
+        sport: sport ? String(sport).trim() : null,
+        amount: amt,
+        type: typeStr,
+        method: ['cash', 'card', 'transfer', 'pos', 'other'].includes(String(method)) ? String(method) : 'cash',
+        note: note ? String(note).trim() : null,
+        received_by: req.staff.full_name,
+        created_at: date ? `${String(date).slice(0, 10)} ${new Date().toISOString().slice(11, 19)}` : undefined,
+      });
+      const dir = direction === 'out' || typeStr === 'coach_payout' ? 'out' : 'in';
+      const paidAt = String(paid_at || date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+      const titleVal = title ? String(title).trim() : null;
+      const coachVal = coach_id != null && coach_id !== '' ? Number(coach_id) : null;
+      db.prepare('UPDATE payments SET direction = ?, title = ?, paid_at = ?, coach_id = COALESCE(?, coach_id) WHERE id = ?')
+        .run(dir, titleVal, paidAt, coachVal, created.id);
+      audit(req, 'accounting.payment', {
+        entityType: 'payment',
+        entityId: created.id,
+        memberId: member ? member.id : null,
+        detail: { amount: amt, type: typeStr, direction: dir, sport: sport || null },
+      });
+      return created.id;
     });
-
-    const dir = direction === 'out' || typeStr === 'coach_payout' ? 'out' : 'in';
-    const paidAt = String(paid_at || date || new Date().toISOString().slice(0, 10)).slice(0, 10);
-    const titleVal = title ? String(title).trim() : null;
-    const coachVal = coach_id != null && coach_id !== '' ? Number(coach_id) : null;
-    db.prepare('UPDATE payments SET direction = ?, title = ?, paid_at = ?, coach_id = COALESCE(?, coach_id) WHERE id = ?')
-      .run(dir, titleVal, paidAt, coachVal, created.id);
-
-    audit(req, 'accounting.payment', {
-      entityType: 'payment',
-      entityId: created.id,
-      memberId: member ? member.id : null,
-      detail: { amount: amt, type: typeStr, direction: dir, sport: sport || null },
-    });
-    res.status(201).json(mapPaymentRow(db.prepare('SELECT * FROM payments WHERE id = ?').get(created.id)));
+    const paymentId = createPayment();
+    res.status(201).json(mapPaymentRow(db.prepare('SELECT * FROM payments WHERE id = ?').get(paymentId)));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create payment' });
@@ -2808,13 +2832,15 @@ app.delete('/accounting/payments/:id', accountingGuards, (req, res) => {
     const id = Number(req.params.id);
     const row = db.prepare('SELECT * FROM payments WHERE id = ?').get(id);
     if (!row) return res.status(404).json({ error: 'پرداخت پیدا نشد' });
-    db.prepare('DELETE FROM payments WHERE id = ?').run(id);
-    audit(req, 'accounting.payment_delete', {
-      entityType: 'payment',
-      entityId: id,
-      memberId: row.member_id,
-      detail: { amount: row.amount },
-    });
+    db.transaction(() => {
+      db.prepare('DELETE FROM payments WHERE id = ?').run(id);
+      audit(req, 'accounting.payment_delete', {
+        entityType: 'payment',
+        entityId: id,
+        memberId: row.member_id,
+        detail: { before: row },
+      });
+    })();
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -3066,17 +3092,21 @@ app.post('/accounting/expenses', accountingGuards, (req, res) => {
     }
     const day = date || spent_at;
     const noteVal = note != null ? note : notes;
-    const r = db.prepare('INSERT INTO expenses (title, amount, category, date, note, recorded_by) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(
-        String(title).trim(),
-        amt,
-        category ? String(category).trim() : 'عمومی',
-        day ? String(day).slice(0, 10) : new Date().toISOString().slice(0, 10),
-        noteVal ? String(noteVal).trim() : null,
-        req.staff.full_name
-      );
-    audit(req, 'accounting.expense', { entityType: 'expense', entityId: r.lastInsertRowid, detail: { title: String(title).trim(), amount: amt } });
-    res.status(201).json(mapExpenseRow(db.prepare('SELECT * FROM expenses WHERE id = ?').get(r.lastInsertRowid)));
+    const createExpense = db.transaction(() => {
+      const r = db.prepare('INSERT INTO expenses (title, amount, category, date, note, recorded_by) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(
+          String(title).trim(),
+          amt,
+          category ? String(category).trim() : 'عمومی',
+          day ? String(day).slice(0, 10) : new Date().toISOString().slice(0, 10),
+          noteVal ? String(noteVal).trim() : null,
+          req.staff.full_name
+        );
+      const row = db.prepare('SELECT * FROM expenses WHERE id = ?').get(r.lastInsertRowid);
+      audit(req, 'accounting.expense', { entityType: 'expense', entityId: r.lastInsertRowid, detail: { after: row } });
+      return row;
+    });
+    res.status(201).json(mapExpenseRow(createExpense()));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create expense' });
@@ -3093,17 +3123,21 @@ app.put('/accounting/expenses/:id', accountingGuards, (req, res) => {
     if (!amt || amt <= 0) {
       return res.status(400).json({ error: 'مبلغ هزینه باید بزرگ‌تر از صفر باشد' });
     }
-    db.prepare('UPDATE expenses SET title = ?, amount = ?, category = ?, date = ?, note = ? WHERE id = ?')
-      .run(
-        title ? String(title).trim() : existing.title,
-        amt,
-        category ? String(category).trim() : existing.category,
-        date ? String(date).slice(0, 10) : existing.date,
-        note != null ? String(note).trim() : existing.note,
-        id
-      );
-    audit(req, 'accounting.expense_update', { entityType: 'expense', entityId: id, detail: { title: String(title || existing.title).trim(), amount: amt } });
-    res.json(db.prepare('SELECT * FROM expenses WHERE id = ?').get(id));
+    const updateExpense = db.transaction(() => {
+      db.prepare('UPDATE expenses SET title = ?, amount = ?, category = ?, date = ?, note = ? WHERE id = ?')
+        .run(
+          title ? String(title).trim() : existing.title,
+          amt,
+          category ? String(category).trim() : existing.category,
+          date ? String(date).slice(0, 10) : existing.date,
+          note != null ? String(note).trim() : existing.note,
+          id
+        );
+      const row = db.prepare('SELECT * FROM expenses WHERE id = ?').get(id);
+      audit(req, 'accounting.expense_update', { entityType: 'expense', entityId: id, detail: { before: existing, after: row } });
+      return row;
+    });
+    res.json(updateExpense());
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to update expense' });
@@ -3115,8 +3149,10 @@ app.delete('/accounting/expenses/:id', accountingGuards, (req, res) => {
     const id = Number(req.params.id);
     const existing = db.prepare('SELECT * FROM expenses WHERE id = ?').get(id);
     if (!existing) return res.status(404).json({ error: 'هزینه پیدا نشد' });
-    db.prepare('DELETE FROM expenses WHERE id = ?').run(id);
-    audit(req, 'accounting.expense_delete', { entityType: 'expense', entityId: id, detail: { title: existing.title } });
+    db.transaction(() => {
+      db.prepare('DELETE FROM expenses WHERE id = ?').run(id);
+      audit(req, 'accounting.expense_delete', { entityType: 'expense', entityId: id, detail: { before: existing } });
+    })();
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -4897,7 +4933,7 @@ require('./statsPublic')(app, db);
 
 if (fs.existsSync(SPA_INDEX)) {
   app.use(express.static(STATIC_DIR, { index: false }));
-  app.get('*', (req, res, next) => {
+  app.get('/{*splat}', (req, res, next) => {
     if (req.isApiRequest || req.path.startsWith('/api')) return next();
     res.sendFile(SPA_INDEX);
   });

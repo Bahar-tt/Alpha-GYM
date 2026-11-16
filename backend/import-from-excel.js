@@ -6,7 +6,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const XLSX = require('xlsx');
+const ExcelJS = require('exceljs');
 const Database = require('./sqlite-wrapper');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'gym.db');
@@ -52,8 +52,31 @@ function startDefault() {
   return new Date().toISOString().slice(0, 10);
 }
 
+async function readRows(filePath) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(filePath);
+  const sheet = workbook.worksheets[0];
+  if (!sheet) return [];
+  const headers = [];
+  sheet.getRow(1).eachCell((cell, columnNumber) => {
+    headers[columnNumber] = String(cell.value ?? '').trim();
+  });
+  const rows = [];
+  sheet.eachRow((row, rowNumber) => {
+    if (rowNumber === 1) return;
+    const item = {};
+    row.eachCell((cell, columnNumber) => {
+      item[headers[columnNumber]] = cell.value ?? '';
+    });
+    rows.push(item);
+  });
+  return rows;
+}
+
 console.log('[IMPORT] DB =', DB_PATH);
 const db = new Database(DB_PATH);
+
+async function main() {
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS members (
@@ -127,9 +150,7 @@ let skipped = 0;
 
 if (fs.existsSync(membersFile)) {
   console.log('[IMPORT] Reading members:', membersFile);
-  const wb = XLSX.readFile(membersFile);
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+  const rows = await readRows(membersFile);
 
   const insMember = db.prepare(`
     INSERT INTO members (
@@ -220,9 +241,7 @@ if (fs.existsSync(membersFile)) {
 
 if (fs.existsSync(coachesFile)) {
   console.log('[IMPORT] Reading coaches:', coachesFile);
-  const wb = XLSX.readFile(coachesFile);
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+  const rows = await readRows(coachesFile);
 
   const insCoach = db.prepare(`INSERT INTO coaches (name, phone, is_active) VALUES (?, ?, 1)`);
   const findCoach = db.prepare(`SELECT id FROM coaches WHERE name = ?`);
@@ -274,3 +293,9 @@ const sample = db
 console.log(`[IMPORT] totals → members=${mc}, coaches=${cc}`);
 console.log('[IMPORT] sample code 16:', sample || '(not found)');
 console.log('[IMPORT] done. Start server: npm start');
+}
+
+main().catch((err) => {
+  console.error('[IMPORT] failed:', err);
+  process.exitCode = 1;
+});

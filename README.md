@@ -120,3 +120,22 @@ npm audit
 ```
 
 از `npm audit fix --force` بدون بررسی تغییرات major استفاده نکنید.
+
+## Deploy امن روی سرور
+
+اسکریپت `alpha-reportfix-deploy.sh` قبل از deploy، وضعیت clean گیت را بررسی می‌کند، از `.env` و SQLite نسخه پشتیبان می‌گیرد، با `git pull --ff-only` فقط commit تأییدشده را دریافت می‌کند، با `npm ci` نصب دقیق انجام می‌دهد، typecheck/lint/build و syntax بک‌اند را اجرا می‌کند، سپس Docker Compose یا systemd را restart و health check می‌کند.
+
+نمونه اجرای Docker Compose:
+
+```bash
+sudo install -m 750 alpha-reportfix-deploy.sh /tmp/alpha-reportfix-deploy.sh
+sudo APP_DIR=/opt/alpha-gym BRANCH=master DEPLOY_MODE=docker /tmp/alpha-reportfix-deploy.sh
+```
+
+برای systemd:
+
+```bash
+sudo APP_DIR=/opt/alpha-gym BRANCH=master DEPLOY_MODE=systemd SYSTEMD_UNIT=alpha-gym.service /tmp/alpha-reportfix-deploy.sh
+```
+
+اسکریپت در صورت dirty بودن working tree یا شکست health check متوقف می‌شود و مسیر backup را چاپ می‌کند. فایل‌های `.env` هرگز از Git overwrite نمی‌شوند.

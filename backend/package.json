@@ -10,9 +10,13 @@
     "better-sqlite3": "^11.10.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
-    "express": "^4.21.2",
+    "exceljs": "4.4.0",
+    "express": "5.3.0",
     "jalali-moment": "^3.3.11",
-    "node-cron": "^3.0.3",
-    "xlsx": "^0.18.5"
+    "moment": "2.31.0",
+    "node-cron": "^3.0.3"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
   }
 }
