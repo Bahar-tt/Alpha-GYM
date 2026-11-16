@@ -1,95 +1,122 @@
-# Alpha Gym MVP (React + Express + SQLite)
+# Alpha Gym
 
-سیستم مدیریت باشگاه آلفا — فرانت‌اند React + بک‌اند Express + دیتابیس SQLite.
+سیستم مدیریت باشگاه آلفا با رابط React/Vite، سرور Express و دیتابیس SQLite. ماژول‌های اصلی شامل مدیریت اعضا، تمدید اشتراک، پیامک، حسابداری، سهم مربی، گزارش مالی، حضور و غیاب، پورتال مربی، مدیریت کاربران و Audit Log است.
 
-## اجرای با Docker (توصیه‌شده — پورت 8000)
+## پیش‌نیازها
 
-روی سرورهای Cloudflare که پورت‌های `3000 / 5000 / 8000` را پشتیبانی می‌کنند، از پورت **8000** استفاده کنید.
+- Node.js 20 یا جدیدتر
+- npm 10 یا جدیدتر
+- برای production: Docker و Docker Compose
 
-### ۱. آماده‌سازی env
+## نصب وابستگی‌ها
+
+در ریشه پروژه اجرا کنید:
+
+```bash
+npm install
+npm run typecheck
+npm run lint
+npm run build
+```
+
+برای نصب تکرارپذیر در CI و Docker از lockfile commit‌شده استفاده کنید:
+
+```bash
+npm ci
+cd backend && npm ci
+```
+
+## تنظیمات محیطی
 
 ```bash
 cp .env.example .env
-# سپس KAVENEGAR_API_KEY را در .env قرار دهید
 ```
 
-### ۲. بیلد و اجرا
+متغیرهای مهم:
+
+| متغیر | کاربرد |
+|---|---|
+| `PORT` | پورت سرور؛ پیش‌فرض `8000` |
+| `DB_PATH` | مسیر SQLite؛ در Docker، `/app/data/gym.db` |
+| `CORS_ORIGIN` | originهای مجاز، جداشده با کاما |
+| `PROVIDER_KEY` | کلید طولانی و تصادفی برای فعال‌سازی featureها |
+| `INITIAL_ADMIN_PASSWORD` | رمز اولیه admin در دیتابیس خالی |
+| `INITIAL_STAFF_PASSWORD` | رمز اولیه staff در دیتابیس خالی |
+| `KAVENEGAR_API_KEY` | کلید پیامک |
+| `KAVENEGAR_SENDER` | شماره فرستنده پیامک |
+
+اگر رمزهای اولیه مشخص نشوند، برنامه در دیتابیس خالی رمز تصادفی تولید می‌کند و فقط در log راه‌اندازی چاپ می‌کند. پس از اولین ورود، رمزها را تغییر دهید. مقادیر قدیمی `admin/admin123` و `staff/staff123` پیش‌فرض قطعی این نسخه نیستند.
+
+## اجرای Docker
 
 ```bash
+cp .env.example .env
+# مقادیر واقعی، مخصوصاً PROVIDER_KEY و CORS_ORIGIN را تنظیم کنید
 docker compose up -d --build
 ```
 
-یا بدون compose:
+برنامه روی پورت `8000` اجرا می‌شود و volume داده در `/app/data` قرار دارد. بررسی سلامت:
 
 ```bash
-docker build -t alpha-gym .
-docker run -d \
-  --name alpha-gym \
-  -p 8000:8000 \
-  -e KAVENEGAR_API_KEY=your_key \
-  -e KAVENEGAR_SENDER=20006000853 \
-  -v alpha-gym-data:/app/backend \
-  alpha-gym
+curl http://localhost:8000/health
 ```
 
-اپ روی آدرس زیر در دسترس است:
+پاسخ موفق: `{"ok":true}`
 
-```
-http://YOUR_SERVER:8000
-```
+## اجرای محلی
 
-Health check:
-
-```
-GET /health  →  { "ok": true }
-```
-
-دیتابیس SQLite داخل volume ذخیره می‌شود و با ری‌استارت کانتینر پاک نمی‌شود.
-
----
-
-## اجرای لوکال (بدون Docker)
-
-### Backend (پورت 8000)
+بک‌اند:
 
 ```bash
 cd backend
-npm install
-# فایل .env را در ریشه پروژه یا داخل backend قرار دهید
-PORT=8000 npm start
+npm ci
+npm start
 ```
 
-### Frontend (پورت 5173)
+فرانت‌اند در ترمینال دیگر:
 
 ```bash
-npm install
-# در .env یا .env.local:
-# VITE_API_URL=http://localhost:8000
+npm ci
 npm run dev
 ```
 
-Open http://localhost:5173
+برای اجرای Vite در `.env.local` بنویسید:
 
-### Demo login
+```env
+VITE_API_URL=http://localhost:8000
+```
 
-| Role  | Username | Password  |
-|-------|----------|-----------|
-| Admin | admin    | admin123  |
-| Staff | staff    | staff123  |
+## تاریخ‌ها
 
-## API
+تاریخ‌های قابل مشاهده در پنل، رسیدها، پیامک‌ها و گزارش‌های مالی به‌صورت جلالی نمایش داده می‌شوند. بازه گزارش‌ها با تقویم شمسی انتخاب می‌شود. برای ذخیره‌سازی و مرتب‌سازی، تاریخ‌ها در SQLite با قالب ISO میلادی `YYYY-MM-DD` نگهداری و در رابط کاربری به جلالی تبدیل می‌شوند.
 
-- `GET /health` — health check
-- `GET /members` — list members
-- `POST /members` — create (`name`, `phone`, `expiry_date`, `weekly_sessions`, `birthday`)
-- `PUT /members/:id` — update
-- `DELETE /members/:id` — delete
-- `GET /sms-logs` — SMS history
-- `POST /sms/send` — send single SMS
-- `POST /sms/broadcast` — broadcast SMS
+## احراز هویت
 
-Database file: `backend/gym.db`
+APIهای مدیریتی با Bearer session token محافظت می‌شوند. نقش `admin` به حسابداری، سهم مربی، تنظیمات و مدیریت کاربران دسترسی دارد و نقش `staff` فقط عملیات مجاز روزمره را انجام می‌دهد. رمزها با `scrypt` و salt تصادفی هش می‌شوند و نشست‌ها پس از ۳۰ روز منقضی می‌شوند.
 
-Cron jobs (Asia/Tehran):
-- 09:00 — birthday SMS
-- 10:00 — expiry reminders (1 / 3 / 7 days)
+## Audit Log
+
+مسیر `GET /audit-logs` فقط برای admin است. عملیات اصلی کاربر، عضو، پرداخت، هزینه، سهم مربی و تسویه ثبت می‌شوند. برای حسابرسی رسمی، مسیرهای قدیمی `/coaches`، ایجاد پرداخت ضمنی در ثبت‌نام/تمدید، وضعیت تمدید و رسید‌ها باید تکمیل و یکپارچه شوند؛ این موارد در گزارش بررسی امنیتی شناسایی شده‌اند.
+
+## APIهای مهم
+
+- `GET /health`
+- `POST /auth/login` و `GET /auth/me`
+- `GET/POST/PUT/DELETE /members`
+- `GET /accounting/summary?from=YYYY-MM-DD&to=YYYY-MM-DD`
+- `GET/POST/DELETE /accounting/payments`
+- `GET/POST/PUT/DELETE /accounting/expenses`
+- `GET /audit-logs`
+
+## کنترل کیفیت
+
+```bash
+npm ci
+npm run typecheck
+npm run lint
+npm run build
+node --check backend/server.js
+npm audit
+```
+
+از `npm audit fix --force` بدون بررسی تغییرات major استفاده نکنید.

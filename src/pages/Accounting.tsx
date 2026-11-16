@@ -8,6 +8,8 @@ import {
   type AccountingSummary,
 } from '../services/accountingService';
 import { getCoaches, type Coach } from '../services/coachService';
+import JalaliDatePicker from '../components/JalaliDatePicker';
+import { formatJalali, jalaliToGregorianIso, todayJalali, type JalaliDate } from '../lib/jalaliDate';
 import {
   Wallet,
   TrendingUp,
@@ -46,14 +48,22 @@ export default function Accounting() {
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [showPay, setShowPay] = useState(false);
   const [showExp, setShowExp] = useState(false);
+  const [fromDate, setFromDate] = useState<JalaliDate>(() => {
+    const today = todayJalali();
+    return { ...today, day: 1 };
+  });
+  const [toDate, setToDate] = useState<JalaliDate>(() => todayJalali());
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [s, c] = await Promise.all([getAccountingSummary(), getCoaches()]);
+    const [s, c] = await Promise.all([
+      getAccountingSummary(jalaliToGregorianIso(fromDate), jalaliToGregorianIso(toDate)),
+      getCoaches(),
+    ]);
     if (s.data) setData(s.data);
     setCoaches(c.data || []);
     setLoading(false);
-  }, []);
+  }, [fromDate, toDate]);
 
   useEffect(() => {
     load();
@@ -84,6 +94,15 @@ export default function Accounting() {
             پرداخت
           </button>
         </div>
+      </div>
+
+      <div className="panel-card p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_auto] gap-3 items-end">
+        <JalaliDatePicker label="از تاریخ" value={fromDate} onChange={(d) => d && setFromDate(d)} required />
+        <JalaliDatePicker label="تا تاریخ" value={toDate} onChange={(d) => d && setToDate(d)} required />
+        <button type="button" className="btn-outline h-11" onClick={load}>اعمال بازه</button>
+        <p className="text-xs sm:col-span-2 lg:col-span-3" style={{ color: 'var(--text-muted)' }}>
+          تمام تاریخ‌های گزارش به‌صورت شمسی نمایش داده می‌شوند؛ داده‌ها در دیتابیس با قالب استاندارد میلادی ذخیره می‌شوند.
+        </p>
       </div>
 
       {/* KPI */}
@@ -319,7 +338,7 @@ export default function Accounting() {
                 data.ledger.map((item) => (
                   <tr key={item.id} className="table-row">
                     <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-                      {item.date}
+                      {formatJalali(String(item.date).slice(0, 10))}
                     </td>
                     <td className="px-4 py-3 text-sm" style={{ color: 'var(--text)' }}>
                       {item.title}
@@ -487,7 +506,7 @@ function PaymentsTable({
             rows.map((p) => (
               <tr key={p.id} className="table-row">
                 <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-                  {p.paid_at}
+                  {formatJalali(String(p.paid_at).slice(0, 10))}
                 </td>
                 <td className="px-4 py-3 text-sm" style={{ color: 'var(--text)' }}>
                   {p.title || p.type}
@@ -547,7 +566,7 @@ function ExpensesTable({
             rows.map((e) => (
               <tr key={e.id} className="table-row">
                 <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-                  {e.spent_at}
+                  {formatJalali(String(e.spent_at).slice(0, 10))}
                 </td>
                 <td className="px-4 py-3">
                   <span className="badge badge-warning">{e.category}</span>

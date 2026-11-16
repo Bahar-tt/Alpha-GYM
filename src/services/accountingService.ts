@@ -71,8 +71,12 @@ export interface AccountingSummary {
   ledger: LedgerItem[];
 }
 
-export async function getAccountingSummary() {
-  const result = await apiGet<AccountingSummary>('/accounting/summary');
+export async function getAccountingSummary(from?: string, to?: string) {
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  const query = params.toString();
+  const result = await apiGet<AccountingSummary>(`/accounting/summary${query ? `?${query}` : ''}`);
   if (result.error) return { data: null, error: { message: result.error } };
   return { data: result.data, error: null };
 }

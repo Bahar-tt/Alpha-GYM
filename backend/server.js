@@ -60,9 +60,9 @@ const {
   planUtilization,
 } = require('./services/coachEarnings');
 
-const PORT = 3001;
+const PORT = Number(process.env.PORT) || 8000;
 const ENV = process.env.NODE_ENV || 'development';
-const DB_PATH = path.join(__dirname, 'gym.db');
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'gym.db');
 const STATIC_DIR = process.env.STATIC_DIR || path.join(__dirname, '..', 'dist');
 const SPA_INDEX = path.join(STATIC_DIR, 'index.html');
 const SPA_ROUTES = new Set([
@@ -73,7 +73,20 @@ const SPA_ROUTES = new Set([
 console.log(`[ENV] Running in ${ENV}`);
 
 const app = express();
-app.use(cors());
+const allowedOrigins = String(process.env.CORS_ORIGIN || process.env.FRONTEND_ORIGIN || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+app.use(cors({
+  origin(origin, callback) {
+    // Requests without an Origin header include same-origin, health checks and CLI clients.
+    if (!origin || allowedOrigins.includes(origin) || (ENV !== 'production' && allowedOrigins.length === 0)) {
+      return callback(null, true);
+    }
+    return callback(new Error('CORS origin is not allowed'));
+  },
+  credentials: false,
+}));
 app.use(express.json());
 
 // ── حالت مستقل (بدون nginx): پذیرش پیشوند /api ──
@@ -932,10 +945,13 @@ function publicStaff(staff) {
   };
 }
 
-const PROVIDER_KEY = process.env.PROVIDER_KEY || 'alpha-change-me';
+const PROVIDER_KEY = String(process.env.PROVIDER_KEY || '').trim();
 
 // ✅ اندپوینت سرویس‌دهنده برای فعال/غیرفعال کردن بخش‌های پولی
 app.post('/provider/feature', (req, res) => {
+  if (!PROVIDER_KEY) {
+    return res.status(503).json({ error: 'کلید سرویس‌دهنده تنظیم نشده است' });
+  }
   const key = (req.headers['x-provider-key'] || '').toString();
   if (key !== PROVIDER_KEY) {
     return res.status(401).json({ error: 'کلید سرویس‌دهنده نامعتبر است' });
@@ -947,6 +963,10 @@ app.post('/provider/feature', (req, res) => {
   }
   db.prepare(`UPDATE feature_flags SET enabled = ?, updated_at = datetime('now') WHERE key = ?`)
     .run(enabled ? 1 : 0, feature);
+  audit(req, 'provider.feature_update', {
+    entityType: 'feature_flag',
+    detail: { feature, enabled: !!enabled },
+  });
   res.json({ ok: true, feature, enabled: !!enabled });
 });
 
@@ -1663,7 +1683,14 @@ function createReceipt(payload) {
 
 app.post('/receipts', requireAuth, (req, res) => {
   try {
-    res.status(201).json(createReceipt(req.body || {}));
+    const receipt = createReceipt(req.body || {});
+    audit(req, 'receipt.create', {
+      entityType: 'receipt',
+      entityId: receipt.id,
+      memberId: receipt.member_id,
+      detail: { amount: receipt.amount, type: receipt.type, token: receipt.token },
+    });
+    res.status(201).json(receipt);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create receipt' });
@@ -2426,6 +2453,8 @@ app.patch('/renewals/:id/status', requireAuth, (req, res) => {
   }
 
   try {
+    const existing = db.prepare('SELECT * FROM renewals WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'Renewal not found' });
     const result = db
       .prepare('UPDATE renewals SET status = ? WHERE id = ?')
       .run(String(status).trim(), id);
@@ -2435,6 +2464,12 @@ app.patch('/renewals/:id/status', requireAuth, (req, res) => {
     }
 
     const row = db.prepare('SELECT * FROM renewals WHERE id = ?').get(id);
+    audit(req, 'renewal.status_update', {
+      entityType: 'renewal',
+      entityId: id,
+      memberId: row.member_id,
+      detail: { old_status: existing.status, new_status: row.status, amount: row.amount },
+    });
     res.json(row);
   } catch (err) {
     console.error(err);
@@ -2625,8 +2660,12 @@ app.get('/accounting/summary', accountingGuards, (req, res) => {
       ORDER BY revenue DESC
     `).all();
 
-    const payments = db.prepare('SELECT * FROM payments ORDER BY id DESC LIMIT 300').all().map(mapPaymentRow);
-    const expenses = db.prepare('SELECT * FROM expenses ORDER BY id DESC LIMIT 300').all().map(mapExpenseRow);
+    const payments = db.prepare(
+      'SELECT * FROM payments WHERE substr(COALESCE(paid_at, created_at), 1, 10) BETWEEN ? AND ? ORDER BY id DESC LIMIT 300'
+    ).all(f, t).map(mapPaymentRow);
+    const expenses = db.prepare(
+      'SELECT * FROM expenses WHERE COALESCE(date, spent_at, substr(created_at, 1, 10)) BETWEEN ? AND ? ORDER BY id DESC LIMIT 300'
+    ).all(f, t).map(mapExpenseRow);
 
     const paymentsIn = payments.filter((p) => p.direction === 'in').reduce((s, p) => s + p.amount, 0);
     const paymentsOut = payments.filter((p) => p.direction === 'out').reduce((s, p) => s + p.amount, 0);
@@ -4709,7 +4748,7 @@ app.get('/coaches/:id', requireAuth, (req, res) => {
   }
 });
 
-app.post('/coaches', requireAuth, (req, res) => {
+app.post('/coaches', requireAuth, requireAdmin, (req, res) => {
   try {
     const b = req.body || {};
     const name = String(b.full_name || b.name || '').trim();
@@ -4736,7 +4775,7 @@ app.post('/coaches', requireAuth, (req, res) => {
   }
 });
 
-app.put('/coaches/:id', requireAuth, (req, res) => {
+app.put('/coaches/:id', requireAuth, requireAdmin, (req, res) => {
   try {
     const id = Number(req.params.id);
     const existing = db.prepare('SELECT * FROM coaches WHERE id = ?').get(id);
@@ -4770,7 +4809,7 @@ app.put('/coaches/:id', requireAuth, (req, res) => {
   }
 });
 
-app.delete('/coaches/:id', requireAuth, (req, res) => {
+app.delete('/coaches/:id', requireAuth, requireAdmin, (req, res) => {
   try {
     const id = Number(req.params.id);
     const existing = db.prepare('SELECT * FROM coaches WHERE id = ?').get(id);
