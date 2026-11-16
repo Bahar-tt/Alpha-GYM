@@ -94,6 +94,19 @@ export async function getAccountingSummary(from?: string, to?: string) {
   return { data: result.data, error: null };
 }
 
+export async function getCoachPayroll(from?: string, to?: string) {
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  const result = await apiGet<{ coach_id: number; coach_name: string; gross: number; net: number; items: number }[]>(`/accounting/coach-earnings?${params.toString()}`);
+  return result.error ? { data: [], error: { message: result.error } } : { data: result.data || [], error: null };
+}
+
+export async function getMemberFinancialAlerts(days = 7) {
+  const result = await apiGet<{ rows: { id: number; member_id: number; member_name: string; alert_type: 'overdue' | 'due_soon'; due_date: string; amount: number; message: string }[]; overdue: number; due_soon: number }>(`/accounting/member-alerts?days=${days}`);
+  return result.error ? { data: null, error: { message: result.error } } : { data: result.data, error: null };
+}
+
 export async function addPayment(payload: {
   type: string;
   amount: number;

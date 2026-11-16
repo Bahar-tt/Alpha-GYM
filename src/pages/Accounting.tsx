@@ -5,6 +5,8 @@ import {
   deletePayment,
   addExpense,
   deleteExpense,
+  getCoachPayroll,
+  getMemberFinancialAlerts,
   type AccountingSummary,
 } from '../services/accountingService';
 import { getCoaches, type Coach } from '../services/coachService';
@@ -26,12 +28,13 @@ import {
   Download,
 } from 'lucide-react';
 
-type Tab = 'overview' | 'specialty' | 'coaches' | 'payments' | 'expenses' | 'ledger';
+type Tab = 'overview' | 'specialty' | 'coaches' | 'payroll' | 'payments' | 'expenses' | 'ledger';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'خلاصه' },
   { id: 'specialty', label: 'درآمد رشته‌ها' },
   { id: 'coaches', label: 'سهم مربی' },
+  { id: 'payroll', label: 'حقوق و تسویه مربیان' },
   { id: 'payments', label: 'دریافت‌ها و پرداخت‌ها' },
   { id: 'expenses', label: 'هزینه‌ها' },
   { id: 'ledger', label: 'دفتر مالی' },
@@ -90,6 +93,8 @@ export default function Accounting() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('overview');
   const [coaches, setCoaches] = useState<Coach[]>([]);
+  const [payroll, setPayroll] = useState<{ coach_id: number; coach_name: string; gross: number; net: number; items: number }[]>([]);
+  const [alerts, setAlerts] = useState<{ member_name: string; alert_type: 'overdue' | 'due_soon'; due_date: string; amount: number }[]>([]);
   const [showPay, setShowPay] = useState(false);
   const [showExp, setShowExp] = useState(false);
   const [fromDate, setFromDate] = useState<JalaliDate>(() => {
@@ -101,12 +106,16 @@ export default function Accounting() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [s, c] = await Promise.all([
+    const [s, c, p, a] = await Promise.all([
       getAccountingSummary(jalaliToGregorianIso(fromDate), jalaliToGregorianIso(toDate)),
       getCoaches(),
+      getCoachPayroll(jalaliToGregorianIso(fromDate), jalaliToGregorianIso(toDate)),
+      getMemberFinancialAlerts(7),
     ]);
     if (s.data) setData(s.data);
     setCoaches(c.data || []);
+    setPayroll(p.data || []);
+    setAlerts(a.data?.rows || []);
     setLoading(false);
   }, [fromDate, toDate]);
 
@@ -239,6 +248,7 @@ export default function Accounting() {
 
       {!loading && data && tab === 'overview' && (
         <>
+        {alerts.length > 0 && <div className="panel-card p-4" style={{ borderColor: 'var(--warning)' }}><div className="flex items-center justify-between gap-3"><div><strong style={{ color: 'var(--warning)' }}>هشدار مالی اعضا</strong><p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>{alerts.filter((x) => x.alert_type === 'overdue').length} بدهی عقب‌افتاده و {alerts.filter((x) => x.alert_type === 'due_soon').length} سررسید نزدیک</p></div><button type="button" className="btn-outline" onClick={() => setTab('payroll')}>مشاهده حقوق و هشدارها</button></div></div>}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="panel-card p-5">
             <h3 className="section-title mb-4 flex items-center gap-2">
@@ -363,6 +373,10 @@ export default function Accounting() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {!loading && data && tab === 'payroll' && (
+        <PayrollPanel rows={payroll} alerts={alerts} />
       )}
 
       {!loading && data && tab === 'payments' && (
@@ -544,6 +558,10 @@ function FlowRow({
       </span>
     </div>
   );
+}
+
+function PayrollPanel({ rows, alerts }: { rows: { coach_id: number; coach_name: string; gross: number; net: number; items: number }[]; alerts: { member_name: string; alert_type: 'overdue' | 'due_soon'; due_date: string; amount: number }[] }) {
+  return <div className="space-y-4"><div className="panel-card overflow-hidden"><div className="p-5"><h3 className="section-title">حقوق و تسویه مربیان</h3><p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>سهم‌های ثبت‌شده، حقوق ثابت و اقلام قابل تسویه در بازه انتخاب‌شده</p></div><table className="w-full"><thead><tr style={{ background: 'var(--bg-muted)' }}>{['مربی', 'تعداد اقلام', 'ناخالص', 'قابل پرداخت'].map((h) => <th key={h} className="text-right text-xs px-4 py-3" style={{ color: 'var(--text-secondary)' }}>{h}</th>)}</tr></thead><tbody>{rows.length === 0 ? <tr><td colSpan={4} className="text-center py-8 text-sm" style={{ color: 'var(--text-muted)' }}>موردی برای این بازه ثبت نشده است</td></tr> : rows.map((r) => <tr className="table-row" key={r.coach_id}><td className="px-4 py-3 text-sm font-medium">{r.coach_name}</td><td className="px-4 py-3 text-sm">{fmt(r.items)}</td><td className="px-4 py-3 text-sm">{fmt(r.gross)}</td><td className="px-4 py-3 text-sm font-bold" style={{ color: 'var(--gold)' }}>{fmt(r.net)}</td></tr>)}</tbody></table></div><div className="panel-card overflow-hidden"><div className="p-5"><h3 className="section-title">هشدار بدهی و سررسید شهریه</h3></div>{alerts.length === 0 ? <p className="p-5 text-sm" style={{ color: 'var(--text-muted)' }}>هشداری وجود ندارد</p> : <table className="w-full"><thead><tr style={{ background: 'var(--bg-muted)' }}>{['عضو', 'وضعیت', 'سررسید', 'مبلغ برآوردی'].map((h) => <th key={h} className="text-right text-xs px-4 py-3" style={{ color: 'var(--text-secondary)' }}>{h}</th>)}</tr></thead><tbody>{alerts.map((a, i) => <tr className="table-row" key={`${a.member_name}-${a.due_date}-${i}`}><td className="px-4 py-3 text-sm">{a.member_name}</td><td className="px-4 py-3"><span className={`badge ${a.alert_type === 'overdue' ? 'badge-danger' : 'badge-warning'}`}>{a.alert_type === 'overdue' ? 'بدهی / منقضی' : 'سررسید نزدیک'}</span></td><td className="px-4 py-3 text-sm">{formatJalali(a.due_date)}</td><td className="px-4 py-3 text-sm font-bold">{fmt(a.amount)}</td></tr>)}</tbody></table>}</div></div>;
 }
 
 function AnalyticsPanel({ analytics }: { analytics: AccountingSummary['analytics'] }) {

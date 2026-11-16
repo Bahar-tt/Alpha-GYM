@@ -106,6 +106,36 @@ async function checkExpiryReminders() {
   console.log(`[Expiry Cron SUMMARY] total=${members.length} success=${successCount} failed=${failureCount}`);
 }
 
+// ثبت هشدارهای مالی برای پنل مدیریت.
+function refreshFinancialAlerts() {
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS member_financial_alerts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, member_id INTEGER NOT NULL, alert_type TEXT NOT NULL,
+      due_date TEXT NOT NULL, amount INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'open',
+      message TEXT, last_notified_at TEXT, created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(member_id, alert_type, due_date)
+    )`);
+    const today = todayIso();
+    const until = db.prepare("SELECT date(?, '+7 day') AS d").get(today).d;
+    const memberColumns = db.prepare('PRAGMA table_info(members)').all().map((c) => c.name);
+    const feeExpr = memberColumns.includes('monthly_fee')
+      ? 'COALESCE(NULLIF(monthly_fee, 0), (SELECT SUM(COALESCE(ms.tuition_amount, ms.unit_price, 0)) FROM member_sports ms WHERE ms.member_id=members.id), 0)'
+      : '(SELECT COALESCE(SUM(COALESCE(ms.tuition_amount, ms.unit_price, 0)), 0) FROM member_sports ms WHERE ms.member_id=members.id)';
+    const rows = db.prepare(`SELECT id, name, expiry_date,
+      ${feeExpr} AS amount
+      FROM members WHERE expiry_date IS NOT NULL AND date(expiry_date) <= date(?)`).all(until);
+    const upsert = db.prepare(`INSERT INTO member_financial_alerts (member_id, alert_type, due_date, amount, message)
+      VALUES (?, ?, ?, ?, ?) ON CONFLICT(member_id, alert_type, due_date) DO UPDATE SET amount=excluded.amount, message=excluded.message, status='open'`);
+    db.transaction(() => rows.forEach((m) => {
+      const type = String(m.expiry_date) < today ? 'overdue' : 'due_soon';
+      upsert.run(m.id, type, String(m.expiry_date).slice(0, 10), Number(m.amount) || 0, type === 'overdue' ? `بدهی/تمدید عقب‌افتاده عضو ${m.name}` : `سررسید شهریه عضو ${m.name} نزدیک است`);
+    }))();
+    console.log(`[Financial Alerts] refreshed=${rows.length}`);
+  } catch (err) {
+    console.error('[Financial Alerts] refresh failed:', err.message);
+  }
+}
+
 function startCrons() {
   if (started) return;
   started = true;
@@ -123,7 +153,10 @@ function startCrons() {
     await checkExpiryReminders();
   }, { timezone: 'Asia/Tehran' });
 
-  console.log('[CRON] All jobs active (birthday + 3-day expiry SMS)');
+  // هشدار بدهی و سررسید شهریه — هر روز ۸:۳۰ صبح تهران
+  cron.schedule('30 8 * * *', refreshFinancialAlerts, { timezone: 'Asia/Tehran' });
+
+  console.log('[CRON] All jobs active (birthday + expiry SMS + financial alerts)');
 }
 
 module.exports = {

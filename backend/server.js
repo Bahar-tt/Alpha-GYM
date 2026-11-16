@@ -4,6 +4,8 @@ const crypto = require('crypto');
 const Database = require('./sqlite-wrapper');
 const path = require('path');
 const fs = require('fs');
+const ExcelJS = require('exceljs');
+const PDFDocument = require('pdfkit');
 
 // ── بارگذاری .env بدون وابستگی خارجی (قبل از require سرویس‌ها) ──
 (function loadDotEnv() {
@@ -372,6 +374,22 @@ db.exec(`
   )
 `);
 
+// ارتقای schema قدیمی مربیان بدون دست‌زدن به سوابق موجود.
+for (const [column, definition] of [
+  ['national_id', 'TEXT'], ['pay_model', "TEXT NOT NULL DEFAULT 'share'"],
+  ['default_share', 'REAL NOT NULL DEFAULT 50'], ['monthly_salary', 'INTEGER NOT NULL DEFAULT 0'],
+  ['can_private', 'INTEGER NOT NULL DEFAULT 1'], ['can_program', 'INTEGER NOT NULL DEFAULT 0'], ['notes', 'TEXT'],
+]) {
+  const cols = db.prepare('PRAGMA table_info(coaches)').all().map((c) => c.name);
+  if (!cols.includes(column)) db.exec(`ALTER TABLE coaches ADD COLUMN ${column} ${definition}`);
+}
+for (const [column, definition] of [
+  ['share_percent', 'REAL'], ['gym_percent', 'REAL'], ['hourly_rate', 'INTEGER'],
+]) {
+  const cols = db.prepare('PRAGMA table_info(coach_sports)').all().map((c) => c.name);
+  if (!cols.includes(column)) db.exec(`ALTER TABLE coach_sports ADD COLUMN ${column} ${definition}`);
+}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -643,6 +661,23 @@ db.exec(`
 db.exec(`CREATE INDEX IF NOT EXISTS idx_earnings_coach_period ON coach_earnings(coach_id, period)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_earnings_settlement ON coach_earnings(settlement_id)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_earnings_member ON coach_earnings(member_id)`);
+
+// هشدارهای قابل پیگیری بدهی و سررسید؛ بدون تغییر در اطلاعات اعضا.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS member_financial_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    member_id INTEGER NOT NULL,
+    alert_type TEXT NOT NULL,
+    due_date TEXT NOT NULL,
+    amount INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'open',
+    message TEXT,
+    last_notified_at TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(member_id, alert_type, due_date)
+  )
+`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_member_alerts_status ON member_financial_alerts(status, due_date)`);
 
 // ── پاداش و کسورات (جریمه، مساعده، پاداش عملکرد) ──
 db.exec(`
@@ -1619,7 +1654,15 @@ function recordPayment({ member_id, member_name, sport, amount, type = 'renewal'
   let share = 0;
   let coach = null;
   if (coach_id != null) {
-    coach = { coach_id: Number(coach_id) };
+    const sportRow = sport
+      ? db.prepare('SELECT commission_percent, commission_amount FROM coach_sports WHERE coach_id = ? AND LOWER(TRIM(sport)) = LOWER(TRIM(?)) LIMIT 1').get(Number(coach_id), String(sport))
+      : null;
+    const coachRow = db.prepare('SELECT default_share FROM coaches WHERE id = ?').get(Number(coach_id));
+    coach = {
+      coach_id: Number(coach_id),
+      commission_percent: Number(sportRow?.commission_percent || coachRow?.default_share || DEFAULT_SHARE_PERCENT),
+      commission_amount: sportRow?.commission_amount,
+    };
   } else if (sport) {
     coach = coachForSport(String(sport));
   }
@@ -1654,6 +1697,19 @@ function recordPayment({ member_id, member_name, sport, amount, type = 'renewal'
     received_by ? String(received_by) : null,
     created_at || new Date().toISOString().slice(0, 19).replace('T', ' ')
   );
+  if (coach && coach.coach_id && share > 0) {
+    const earnedAt = String(created_at || new Date().toISOString()).slice(0, 10);
+    db.prepare(`INSERT OR IGNORE INTO coach_earnings
+      (coach_id, member_id, member_name, sport, source_type, source_id, period, earned_at,
+       unit_price, share_percent, share_basis, gross, net, note)
+      VALUES (?, ?, ?, ?, 'payment', ?, ?, ?, ?, ?, 'payment', ?, ?, ?)`)
+      .run(
+        Number(coach.coach_id), member_id != null ? Number(member_id) : null,
+        member_name ? String(member_name) : null, sport ? String(sport) : null,
+        Number(res.lastInsertRowid), earnedAt.slice(0, 7), earnedAt,
+        amt, sharePercent, amt, share, `سهم خودکار تراکنش ${type}`
+      );
+  }
   return { id: res.lastInsertRowid, coach_id: coach && coach.coach_id ? Number(coach.coach_id) : null, coach_share: share, coach_name: coachName, coach_share_percent: sharePercent };
 }
 
@@ -3267,6 +3323,120 @@ app.get('/accounting/member/:id/ledger', accountingGuards, (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load member ledger' });
+  }
+});
+
+function refreshMemberFinancialAlerts(days = 7) {
+  const horizon = Math.max(0, Math.min(60, Number(days) || 7));
+  const today = todayIso();
+  const until = db.prepare("SELECT date(?, '+' || ? || ' day') AS d").get(today, horizon).d;
+  const memberColumns = db.prepare('PRAGMA table_info(members)').all().map((c) => c.name);
+  const feeExpr = memberColumns.includes('monthly_fee')
+    ? 'COALESCE(NULLIF(m.monthly_fee, 0), (SELECT SUM(COALESCE(ms.tuition_amount, ms.unit_price, 0)) FROM member_sports ms WHERE ms.member_id = m.id), 0)'
+    : '(SELECT COALESCE(SUM(COALESCE(ms.tuition_amount, ms.unit_price, 0)), 0) FROM member_sports ms WHERE ms.member_id = m.id)';
+  const members = db.prepare(`
+    SELECT m.id, m.name, m.phone, m.expiry_date,
+      ${feeExpr} AS amount
+    FROM members m
+    WHERE m.expiry_date IS NOT NULL AND date(m.expiry_date) <= date(?)
+  `).all(until);
+  const upsert = db.prepare(`INSERT INTO member_financial_alerts
+    (member_id, alert_type, due_date, amount, status, message)
+    VALUES (?, ?, ?, ?, 'open', ?)
+    ON CONFLICT(member_id, alert_type, due_date) DO UPDATE SET amount=excluded.amount, message=excluded.message, status='open'`);
+  const tx = db.transaction(() => members.map((m) => {
+    const overdue = String(m.expiry_date) < today;
+    const type = overdue ? 'overdue' : 'due_soon';
+    const message = overdue ? `بدهی/تمدید عقب‌افتاده عضو ${m.name}` : `سررسید شهریه عضو ${m.name} نزدیک است`;
+    upsert.run(m.id, type, String(m.expiry_date).slice(0, 10), Number(m.amount) || 0, message);
+    return { ...m, alert_type: type, message };
+  }))();
+  return tx;
+}
+
+app.get('/accounting/member-alerts', accountingGuards, (req, res) => {
+  try {
+    refreshMemberFinancialAlerts(req.query.days);
+    const rows = db.prepare(`SELECT a.*, m.name AS member_name, m.phone, m.expiry_date
+      FROM member_financial_alerts a JOIN members m ON m.id=a.member_id
+      WHERE a.status='open' ORDER BY a.due_date ASC, a.id DESC`).all();
+    res.json({ rows, overdue: rows.filter((r) => r.alert_type === 'overdue').length, due_soon: rows.filter((r) => r.alert_type === 'due_soon').length });
+  } catch (err) {
+    console.error('GET /accounting/member-alerts', err);
+    res.status(500).json({ error: 'Failed to load member alerts' });
+  }
+});
+
+app.post('/accounting/member-alerts/refresh', accountingGuards, (req, res) => {
+  try {
+    const rows = refreshMemberFinancialAlerts(req.body?.days);
+    audit(req, 'accounting.member_alerts_refresh', { entityType: 'member_financial_alerts', detail: { count: rows.length } });
+    res.json({ ok: true, count: rows.length });
+  } catch (err) {
+    console.error('POST /accounting/member-alerts/refresh', err);
+    res.status(500).json({ error: 'Failed to refresh member alerts' });
+  }
+});
+
+// 📊 خروجی Excel گزارش مالی ماهانه و تراکنش‌ها
+app.get('/accounting/export/monthly-report.xlsx', accountingGuards, async (req, res) => {
+  try {
+    const { f, t } = periodBounds(req.query.from, req.query.to);
+    const payments = db.prepare('SELECT * FROM payments WHERE substr(COALESCE(paid_at, created_at),1,10) BETWEEN ? AND ? ORDER BY id DESC').all(f, t);
+    const expenses = db.prepare('SELECT * FROM expenses WHERE substr(COALESCE(date, spent_at, created_at),1,10) BETWEEN ? AND ? ORDER BY id DESC').all(f, t);
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Alpha Gym';
+    const summary = workbook.addWorksheet('خلاصه مالی');
+    const income = payments.filter((p) => p.direction !== 'out').reduce((s, p) => s + Number(p.amount || 0), 0);
+    const payout = payments.filter((p) => p.direction === 'out').reduce((s, p) => s + Number(p.amount || 0), 0);
+    const expenseTotal = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+    summary.addRows([['گزارش مالی Alpha Gym'], ['از تاریخ', f], ['تا تاریخ', t], [], ['شاخص', 'مبلغ'], ['دریافت‌ها', income], ['پرداخت‌ها', payout], ['هزینه‌ها', expenseTotal], ['خالص واقعی', income - payout - expenseTotal]]);
+    summary.getRow(1).font = { bold: true, size: 16 };
+    summary.getRow(5).font = { bold: true };
+    summary.getColumn(1).width = 24; summary.getColumn(2).width = 20;
+    const tx = workbook.addWorksheet('تراکنش‌ها');
+    tx.columns = [{ header: 'شناسه', key: 'id' }, { header: 'تاریخ', key: 'date' }, { header: 'عضو', key: 'member' }, { header: 'نوع', key: 'type' }, { header: 'جهت', key: 'direction' }, { header: 'مبلغ', key: 'amount' }, { header: 'روش', key: 'method' }, { header: 'مربی', key: 'coach' }];
+    payments.forEach((p) => tx.addRow({ id: p.id, date: String(p.paid_at || p.created_at || '').slice(0, 10), member: p.member_name || '', type: p.type || '', direction: p.direction === 'out' ? 'پرداخت' : 'دریافت', amount: Number(p.amount || 0), method: p.method || '', coach: p.coach_name_snapshot || '' }));
+    expenses.forEach((e) => tx.addRow({ id: `E${e.id}`, date: String(e.date || e.created_at || '').slice(0, 10), member: '', type: e.category || 'هزینه', direction: 'هزینه', amount: Number(e.amount || 0), method: '', coach: '' }));
+    tx.getRow(1).font = { bold: true }; tx.views = [{ state: 'frozen', ySplit: 1 }];
+    tx.columns.forEach((c) => { c.width = Math.max(14, Math.min(28, String(c.header).length + 8)); });
+    const buffer = await workbook.xlsx.writeBuffer();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="alpha-gym-financial-${f}-${t}.xlsx"`);
+    res.send(Buffer.from(buffer));
+  } catch (err) {
+    console.error('GET /accounting/export/monthly-report.xlsx', err);
+    res.status(500).json({ error: 'Failed to export Excel report' });
+  }
+});
+
+// 🧾 خروجی PDF خلاصه مالی و فهرست تراکنش‌ها (PDF استاندارد قابل چاپ)
+app.get('/accounting/export/monthly-report.pdf', accountingGuards, (req, res) => {
+  try {
+    const { f, t } = periodBounds(req.query.from, req.query.to);
+    const payments = db.prepare('SELECT * FROM payments WHERE substr(COALESCE(paid_at, created_at),1,10) BETWEEN ? AND ? ORDER BY id DESC LIMIT 500').all(f, t);
+    const expenses = db.prepare('SELECT * FROM expenses WHERE substr(COALESCE(date, spent_at, created_at),1,10) BETWEEN ? AND ? ORDER BY id DESC LIMIT 500').all(f, t);
+    const income = payments.filter((p) => p.direction !== 'out').reduce((s, p) => s + Number(p.amount || 0), 0);
+    const payout = payments.filter((p) => p.direction === 'out').reduce((s, p) => s + Number(p.amount || 0), 0);
+    const expenseTotal = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+    const fa = new Intl.NumberFormat('fa-IR');
+    const doc = new PDFDocument({ size: 'A4', margin: 42, info: { Title: 'Alpha Gym Financial Report' } });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="alpha-gym-financial-${f}-${t}.pdf"`);
+    doc.pipe(res);
+    doc.fontSize(18).text('Alpha Gym - Financial Report');
+    doc.moveDown(0.5).fontSize(10).text(`Period: ${f} to ${t}`);
+    doc.moveDown().fontSize(12).text(`Income: ${fa.format(income)}    Payments: ${fa.format(payout)}    Expenses: ${fa.format(expenseTotal)}    Net: ${fa.format(income - payout - expenseTotal)}`);
+    doc.moveDown().fontSize(13).text('Transactions');
+    doc.fontSize(8);
+    [...payments.map((p) => [String(p.paid_at || p.created_at || '').slice(0, 10), p.member_name || '-', p.direction === 'out' ? 'OUT' : 'IN', fa.format(p.amount || 0)]), ...expenses.map((e) => [String(e.date || e.created_at || '').slice(0, 10), e.title || '-', 'EXPENSE', fa.format(e.amount || 0)])].forEach((row) => {
+      if (doc.y > 760) doc.addPage();
+      doc.text(row.join(' | '));
+    });
+    doc.end();
+  } catch (err) {
+    console.error('GET /accounting/export/monthly-report.pdf', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to export PDF report' });
   }
 });
 
