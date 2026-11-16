@@ -34,7 +34,7 @@ command -v curl >/dev/null || fail 'curl is required'
 
 # sudo often resets PATH and hides npm installed through nvm for the deploy user.
 if ! command -v npm >/dev/null; then
-  for npm_bin in /usr/local/bin/npm /usr/bin/npm /home/*/.nvm/versions/node/*/bin/npm; do
+  for npm_bin in /usr/local/node/bin/npm /usr/local/bin/npm /usr/bin/npm /home/*/.nvm/versions/node/*/bin/npm; do
     if [[ -x "$npm_bin" ]]; then
       export PATH="$(dirname "$npm_bin"):$PATH"
       break
