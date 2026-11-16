@@ -24,7 +24,7 @@ function RoleBadge({ role }: { role: StaffRole }) {
     </span>
   ) : (
     <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
-      <User size={12} /> منشی
+      <User size={12} /> کاربر عادی
     </span>
   );
 }
@@ -72,7 +72,7 @@ function UserModal({ editTarget, onClose }: UserModalProps) {
       <div className="relative z-10 w-full max-w-md glass-card p-8 animate-fade-in">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-lg font-bold text-white">
-            {isEdit ? 'ویرایش دسترسی کاربر' : 'افزودن کاربر جدید'}
+            {isEdit ? 'ویرایش دسترسی کاربر' : 'ثبت نام منشی'}
           </h2>
           <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
             <X size={20} />
@@ -161,7 +161,7 @@ function UserModal({ editTarget, onClose }: UserModalProps) {
                   }`}
                 >
                   {r === 'admin' ? <ShieldCheck size={16} /> : <User size={16} />}
-                  {r === 'admin' ? 'مدیر' : 'منشی'}
+                  {r === 'admin' ? 'مدیر' : 'کاربر عادی'}
                   {role === r && <Check size={14} className="mr-auto" />}
                 </button>
               ))}
@@ -257,7 +257,7 @@ export default function UsersPage() {
           className="btn-gold flex items-center gap-2 self-start sm:self-auto"
         >
           <UserPlus size={18} />
-          افزودن کاربر
+          ثبت نام منشی
         </button>
       </div>
 

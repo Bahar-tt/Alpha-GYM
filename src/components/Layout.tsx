@@ -53,7 +53,7 @@ const PAGE_TITLES: Record<string, string> = {
 const SIDEBAR_W = 280;
 
 export default function Layout() {
-  const { profile, isAdmin, signOut, role } = useAuth();
+  const { profile, isAdmin, signOut } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [appVersion, setAppVersion] = useState('—');
@@ -67,7 +67,6 @@ export default function Layout() {
   const pathKey = location.pathname.startsWith('/sms') ? '/sms' : location.pathname;
   const currentTitle = PAGE_TITLES[pathKey] || 'آلفا جیم';
   const displayName = profile?.full_name?.trim() || 'کاربر';
-  const roleLabel = isAdmin ? 'مدیر سیستم' : role === 'staff' ? 'منشی' : 'کاربر';
 
   // حالت سه‌بعدی: کارت‌های آماری با حرکت موس کمی کج می‌شوند
   useEffect(() => {
@@ -121,7 +120,7 @@ export default function Layout() {
         className={`sidebar-brand-bar fixed top-0 bottom-0 right-0 z-50 flex flex-col transition-transform duration-300 ease-out ${
           mobileOpen ? 'translate-x-0' : 'translate-x-full'
         } lg:!translate-x-0`}
-        style={{ width: SIDEBAR_W }}
+        style={{ width: SIDEBAR_W, background: '#000000', borderColor: '#222222' }}
       >
         <div
           className="h-[2px] shrink-0 w-full"
@@ -207,9 +206,6 @@ export default function Layout() {
             <div className="min-w-0">
               <p className="text-xs font-semibold truncate" style={{ color: 'var(--text)' }}>
                 {displayName}
-              </p>
-              <p className="text-[10px]" style={{ color: 'var(--accent)' }}>
-                {roleLabel}
               </p>
             </div>
           </div>

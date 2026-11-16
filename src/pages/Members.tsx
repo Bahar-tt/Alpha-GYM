@@ -176,6 +176,9 @@ export default function Members() {
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'expired'>('all');
+  const [coachFilter, setCoachFilter] = useState('');
+  const [sportFilter, setSportFilter] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Member | null>(null);
   const [form, setForm] = useState<MemberForm>(emptyForm);
@@ -219,9 +222,15 @@ export default function Members() {
     if (receipts.data) setProfileReceipts(receipts.data);
   };
 
+  const sportOptions = Array.from(new Set(members.flatMap((m) => (m.sports || []).map((s) => s.sport).filter(Boolean)))).sort((a, b) => a.localeCompare(b, 'fa'));
   const filteredMembers = members.filter((m) => {
     const q = search.toLowerCase();
-    return m.full_name.toLowerCase().includes(q) || m.phone.includes(search) || (m.personnel_code || '').toLowerCase().includes(q) || (m.national_id || '').includes(search);
+    const matchesSearch = m.full_name.toLowerCase().includes(q) || m.phone.includes(search) || (m.personnel_code || '').toLowerCase().includes(q) || (m.national_id || '').includes(search);
+    const matchesCoach = !coachFilter || (m.sports || []).some((s) => String(s.coach_id || '') === coachFilter) || String(m.coach_id || '') === coachFilter;
+    const matchesSport = !sportFilter || (m.sports || []).some((s) => s.sport === sportFilter) || m.sport === sportFilter;
+    const expired = getMembershipStatus(m.end_date, archivedIds.has(m.id)).kind === 'expired' || getMembershipStatus(m.end_date, archivedIds.has(m.id)).kind === 'archived';
+    const matchesStatus = statusFilter === 'all' || (statusFilter === 'expired' ? expired : !expired);
+    return matchesSearch && matchesCoach && matchesSport && matchesStatus;
   });
 
   const openAdd = () => { setEditing(null); setForm(emptyForm()); setFormError(''); setShowModal(true); };
@@ -355,9 +364,15 @@ export default function Members() {
         <button type="button" onClick={openAdd} className="btn-primary"><UserPlus size={16} /> عضو جدید</button>
       </div>
 
-      <div className="relative">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div className="relative md:col-span-2">
         <Search size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--text-muted)' }} />
         <input className="input-field pr-10" placeholder="جستجو نام، تلفن، کد ملی یا پرسنلی..." value={search} onChange={(e) => setSearch(e.target.value)} />
+      </div>
+      <select className="input-field" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}><option value="all">همه وضعیت‌ها</option><option value="active">فعال</option><option value="expired">منقضی/بایگانی</option></select>
+      <select className="input-field" value={coachFilter} onChange={(e) => setCoachFilter(e.target.value)}><option value="">همه مربی‌ها</option>{coaches.map((c) => <option key={c.id} value={c.id}>{c.full_name}</option>)}</select>
+      <select className="input-field md:col-span-2" value={sportFilter} onChange={(e) => setSportFilter(e.target.value)}><option value="">همه رشته‌ها</option>{sportOptions.map((s) => <option key={s} value={s}>{sportLabel(s)}</option>)}</select>
+      <button type="button" className="btn-secondary" onClick={() => { setSearch(''); setStatusFilter('all'); setCoachFilter(''); setSportFilter(''); }}>پاک‌کردن فیلترها</button>
       </div>
 
       <div className="panel-card overflow-hidden">
