@@ -1626,9 +1626,9 @@ function recordPayment({ member_id, member_name, sport, amount, type = 'renewal'
   let coachName = null;
   let sharePercent = 0;
   if (coach && coach.coach_id) {
-    const coachRow = db.prepare('SELECT name, default_share FROM coaches WHERE id = ?').get(Number(coach.coach_id));
+    const coachRow = db.prepare('SELECT name FROM coaches WHERE id = ?').get(Number(coach.coach_id));
     coachName = coachRow ? coachRow.name : null;
-    sharePercent = Number(coach.commission_percent || (coachRow && coachRow.default_share) || 0) || 0;
+    sharePercent = Number(coach.commission_percent || 0) || 0;
     share = coach_share != null
       ? Math.max(0, Number(coach_share) || 0)
       : (coach.commission_amount != null && coach.commission_amount > 0
