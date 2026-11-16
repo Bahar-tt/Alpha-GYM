@@ -18,6 +18,7 @@ import {
   ChevronLeft,
   UserRound,
   Wallet,
+  CalendarCheck,
   Settings,
   Bell,
   Sparkles,
@@ -31,6 +32,7 @@ const NAV_ITEMS = [
   { to: '/coaches', label: 'مربیان', icon: UserRound, adminOnly: true },
   { to: '/coach', label: 'پورتال مربی', icon: Dumbbell, adminOnly: true },
   { to: '/accounting', label: 'حسابداری', icon: Wallet, adminOnly: true },
+  { to: '/staff-attendance', label: 'تردد پرسنل', icon: CalendarCheck, adminOnly: false },
   { to: '/settings', label: 'تنظیمات', icon: Settings, adminOnly: true },
   { to: '/users', label: 'کاربران', icon: UserCog, adminOnly: true },
 ] as const;
@@ -43,6 +45,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/coaches': 'مربیان',
   '/coach': 'پورتال مربی',
   '/accounting': 'حسابداری',
+  '/staff-attendance': 'تردد پرسنل',
   '/settings': 'تنظیمات پنل',
   '/users': 'مدیریت کاربران',
 };
