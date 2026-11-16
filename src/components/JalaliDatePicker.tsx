@@ -167,12 +167,12 @@ export default function JalaliDatePicker({
 
       {open && (
         <div
-          className="absolute z-[80] mt-2 w-[300px] max-w-[calc(100vw-2rem)] rounded-2xl p-3 shadow-lg"
+          className="absolute z-[100] mt-2 w-[320px] max-w-[calc(100vw-2rem)] rounded-2xl p-3 shadow-lg"
           style={{
             background: 'var(--bg-elevated)',
             border: '1px solid var(--border)',
             boxShadow: 'var(--shadow)',
-            left: 0,
+            right: 0,
           }}
         >
           {/* Header: month / year */}

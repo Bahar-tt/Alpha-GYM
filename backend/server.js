@@ -2594,6 +2594,7 @@ function mapPaymentRow(p) {
     type,
     amount: Number(p.amount) || 0,
     direction,
+    method: p.method || 'cash',
     member_id: p.member_id ?? null,
     coach_id: p.coach_id ?? null,
     title: p.title || p.member_name || p.note || null,
@@ -2629,7 +2630,8 @@ app.get('/accounting/summary', accountingGuards, (req, res) => {
     // درآمد تئوریک ماهانه از شهریه‌های ثبت‌شده روی اشتراک‌های فعال
     const feeRows = db.prepare(`
       SELECT ms.tuition_amount AS fee, ms.unit_price AS unit, ms.coach_id,
-             COALESCE(cs.commission_percent, c.default_share, 0) AS pct
+             CASE WHEN COALESCE(cs.commission_percent, 0) > 0
+                  THEN cs.commission_percent ELSE COALESCE(c.default_share, 0) END AS pct
       FROM member_sports ms
       JOIN members m ON m.id = ms.member_id
       LEFT JOIN coaches c ON c.id = ms.coach_id
@@ -2646,19 +2648,29 @@ app.get('/accounting/summary', accountingGuards, (req, res) => {
     }
 
     const bySpecialty = db.prepare(`
-      SELECT COALESCE(NULLIF(TRIM(ms.sport), ''), 'نامشخص') AS specialty,
+      SELECT CASE
+               WHEN TRIM(ms.sport) IN ('خصوصی فاطمه', 'خصوصی فاطمه طباطبایی', 'خصوصی فاطمه طباطبایی زاده')
+                 THEN 'خصوصی فاطمه طباطبایی'
+               ELSE COALESCE(NULLIF(TRIM(ms.sport), ''), 'نامشخص')
+             END AS specialty,
              COUNT(DISTINCT ms.member_id) AS members,
              COALESCE(SUM(COALESCE(NULLIF(ms.tuition_amount, 0), ms.unit_price, 0)), 0) AS revenue,
              ROUND(COALESCE(SUM(
                COALESCE(NULLIF(ms.tuition_amount, 0), ms.unit_price, 0) *
-               COALESCE(cs.commission_percent, c.default_share, 0) / 100.0
+               CASE WHEN COALESCE(cs.commission_percent, 0) > 0
+                    THEN cs.commission_percent ELSE COALESCE(c.default_share, 0) END / 100.0
              ), 0)) AS coach_share
       FROM member_sports ms
       JOIN members m ON m.id = ms.member_id
       LEFT JOIN coaches c ON c.id = ms.coach_id
       LEFT JOIN coach_sports cs ON cs.coach_id = ms.coach_id AND cs.sport = ms.sport
       WHERE date(m.expiry_date) >= date('now')
-      GROUP BY specialty
+      GROUP BY CASE
+                 WHEN TRIM(ms.sport) IN ('خصوصی فاطمه', 'خصوصی فاطمه طباطبایی', 'خصوصی فاطمه طباطبایی زاده')
+                   THEN 'خصوصی فاطمه طباطبایی'
+                 ELSE COALESCE(NULLIF(TRIM(ms.sport), ''), 'نامشخص')
+               END
+      HAVING COALESCE(SUM(COALESCE(NULLIF(ms.tuition_amount, 0), ms.unit_price, 0)), 0) > 0
       ORDER BY revenue DESC
     `).all();
 
@@ -2671,7 +2683,8 @@ app.get('/accounting/summary', accountingGuards, (req, res) => {
              COALESCE(c.default_share, 0) AS commission_percent,
              ROUND(COALESCE(SUM(
                COALESCE(NULLIF(ms.tuition_amount, 0), ms.unit_price, 0) *
-               COALESCE(cs.commission_percent, c.default_share, 0) / 100.0
+               CASE WHEN COALESCE(cs.commission_percent, 0) > 0
+                    THEN cs.commission_percent ELSE COALESCE(c.default_share, 0) END / 100.0
              ), 0)) AS coach_share
       FROM member_sports ms
       JOIN members m ON m.id = ms.member_id
@@ -2679,6 +2692,7 @@ app.get('/accounting/summary', accountingGuards, (req, res) => {
       LEFT JOIN coach_sports cs ON cs.coach_id = ms.coach_id AND cs.sport = ms.sport
       WHERE date(m.expiry_date) >= date('now') AND ms.coach_id IS NOT NULL
       GROUP BY ms.coach_id
+      HAVING COALESCE(SUM(COALESCE(NULLIF(ms.tuition_amount, 0), ms.unit_price, 0)), 0) > 0
       ORDER BY revenue DESC
     `).all();
 

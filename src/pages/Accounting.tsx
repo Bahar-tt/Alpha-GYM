@@ -31,15 +31,30 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'خلاصه' },
   { id: 'specialty', label: 'درآمد رشته‌ها' },
   { id: 'coaches', label: 'سهم مربی' },
-  { id: 'payments', label: 'پرداخت‌ها' },
+  { id: 'payments', label: 'دریافت‌ها و پرداخت‌ها' },
   { id: 'expenses', label: 'هزینه‌ها' },
-  { id: 'ledger', label: 'گردش حساب' },
+  { id: 'ledger', label: 'دفتر مالی' },
 ];
 
 const EXPENSE_CATEGORIES = ['اجاره', 'قبوض', 'تجهیزات', 'حقوق', 'تبلیغات', 'تعمیرات', 'عمومی'];
 
 function fmt(n: number) {
   return Math.round(n).toLocaleString('fa-IR');
+}
+
+function paymentTypeLabel(type: string) {
+  const labels: Record<string, string> = {
+    registration: 'ثبت‌نام عضو', renewal: 'تمدید عضویت', member_fee: 'دریافت شهریه',
+    coach_payout: 'پرداخت سهم مربی', manual: 'ثبت دستی', fee: 'دریافت کارمزد', other: 'سایر',
+  };
+  return labels[type] || 'تراکنش مالی';
+}
+
+function paymentMethodLabel(method?: string) {
+  const labels: Record<string, string> = {
+    cash: 'نقدی', card: 'کارتخوان', transfer: 'واریز بانکی', pos: 'کارتخوان', gateway: 'درگاه پرداخت', other: 'سایر',
+  };
+  return labels[method || ''] || 'ثبت نشده';
 }
 
 function downloadReport(data: AccountingSummary, from: JalaliDate, to: JalaliDate, format: 'excel' | 'pdf') {
@@ -143,7 +158,7 @@ export default function Accounting() {
         </div>
       </div>
 
-      <div className="panel-card p-4">
+      <div className="panel-card p-4 overflow-visible relative z-20">
         <div className="flex flex-col lg:flex-row lg:items-end gap-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 flex-1">
             <JalaliDatePicker label="از تاریخ" value={fromDate} onChange={(d) => d && setFromDate(d)} required />
@@ -371,7 +386,7 @@ export default function Accounting() {
           <table className="w-full min-w-[560px]">
             <thead>
               <tr style={{ background: 'var(--bg-muted)' }}>
-                {['تاریخ', 'شرح', 'نوع', 'مبلغ'].map((h) => (
+                {['تاریخ', 'شرح تراکنش', 'جریان مالی', 'مبلغ'].map((h) => (
                   <th key={h} className="text-right text-xs px-4 py-3" style={{ color: 'var(--text-secondary)' }}>
                     {h}
                   </th>
@@ -396,7 +411,7 @@ export default function Accounting() {
                     </td>
                     <td className="px-4 py-3">
                       <span className={`badge ${item.direction === 'in' ? 'badge-success' : 'badge-danger'}`}>
-                        {item.kind === 'expense' ? 'هزینه' : item.direction === 'in' ? 'ورود' : 'خروج'}
+                        {item.kind === 'expense' ? 'هزینه' : item.direction === 'in' ? 'دریافت' : 'پرداخت'}
                       </span>
                     </td>
                     <td
@@ -539,7 +554,7 @@ function PaymentsTable({
       <table className="w-full min-w-[640px]">
         <thead>
           <tr style={{ background: 'var(--bg-muted)' }}>
-            {['تاریخ', 'عنوان', 'نوع', 'جهت', 'مبلغ', ''].map((h) => (
+            {['تاریخ', 'شرح تراکنش', 'نوع عملیات', 'روش پرداخت', 'دریافت/پرداخت', 'مبلغ', ''].map((h) => (
               <th key={h || 'a'} className="text-right text-xs px-4 py-3" style={{ color: 'var(--text-secondary)' }}>
                 {h}
               </th>
@@ -549,7 +564,7 @@ function PaymentsTable({
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={6} className="text-center py-10 text-sm" style={{ color: 'var(--text-muted)' }}>
+              <td colSpan={7} className="text-center py-10 text-sm" style={{ color: 'var(--text-muted)' }}>
                 پرداختی ثبت نشده
               </td>
             </tr>
@@ -560,14 +575,17 @@ function PaymentsTable({
                   {formatJalali(String(p.paid_at).slice(0, 10))}
                 </td>
                 <td className="px-4 py-3 text-sm" style={{ color: 'var(--text)' }}>
-                  {p.title || p.type}
+                  {p.title || paymentTypeLabel(p.type)}
                 </td>
                 <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                  {p.type}
+                  {paymentTypeLabel(p.type)}
+                </td>
+                <td className="px-4 py-3">
+                  <span className="badge badge-info">{paymentMethodLabel(p.method)}</span>
                 </td>
                 <td className="px-4 py-3">
                   <span className={`badge ${p.direction === 'in' ? 'badge-success' : 'badge-danger'}`}>
-                    {p.direction === 'in' ? 'ورود' : 'خروج'}
+                    {p.direction === 'in' ? 'دریافت' : 'پرداخت'}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-sm font-bold" style={{ color: 'var(--text)' }}>

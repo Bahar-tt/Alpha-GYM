@@ -35,6 +35,7 @@ export interface Payment {
   type: string;
   amount: number;
   direction: 'in' | 'out';
+  method?: 'cash' | 'card' | 'transfer' | 'pos' | 'gateway' | 'other' | string;
   member_id?: number | null;
   coach_id?: number | null;
   title?: string | null;
