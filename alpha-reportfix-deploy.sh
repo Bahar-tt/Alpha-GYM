@@ -29,9 +29,19 @@ trap 'fail "deployment failed at line ${BASH_LINENO[0]}"' ERR
 
 [[ "${EUID}" -eq 0 ]] || fail 'run with sudo/root'
 command -v git >/dev/null || fail 'git is required'
-command -v npm >/dev/null || fail 'npm is required'
 command -v curl >/dev/null || fail 'curl is required'
 [[ -d "$APP_DIR/.git" ]] || fail "not a git checkout: $APP_DIR"
+
+# sudo often resets PATH and hides npm installed through nvm for the deploy user.
+if ! command -v npm >/dev/null; then
+  for npm_bin in /usr/local/bin/npm /usr/bin/npm /home/*/.nvm/versions/node/*/bin/npm; do
+    if [[ -x "$npm_bin" ]]; then
+      export PATH="$(dirname "$npm_bin"):$PATH"
+      break
+    fi
+  done
+fi
+command -v npm >/dev/null || fail 'npm is required; install Node.js/npm system-wide or expose the nvm bin directory in PATH'
 
 mkdir -p "$BACKUP_ROOT"
 ( set -o noclobber; : > "$LOCK_FILE" ) 2>/dev/null || fail 'another deployment is already running'
