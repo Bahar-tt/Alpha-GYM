@@ -22,6 +22,7 @@ import {
   X,
   RefreshCcw,
   PieChart,
+  Download,
 } from 'lucide-react';
 
 type Tab = 'overview' | 'specialty' | 'coaches' | 'payments' | 'expenses' | 'ledger';
@@ -41,6 +42,33 @@ function fmt(n: number) {
   return Math.round(n).toLocaleString('fa-IR');
 }
 
+function downloadReport(data: AccountingSummary, from: JalaliDate, to: JalaliDate, format: 'excel' | 'pdf') {
+  const rows = [
+    ['گزارش حسابداری Alpha Gym', '', '', ''],
+    ['بازه', `${from.year}/${String(from.month).padStart(2, '0')}/${String(from.day).padStart(2, '0')}`, `${to.year}/${String(to.month).padStart(2, '0')}/${String(to.day).padStart(2, '0')}`, ''],
+    [],
+    ['تاریخ', 'نوع', 'شرح', 'مبلغ'],
+    ...data.ledger.map((item) => [formatJalali(String(item.date).slice(0, 10)), item.kind === 'expense' ? 'هزینه' : item.direction === 'in' ? 'ورود' : 'خروج', item.title, String(item.amount)]),
+  ];
+  if (format === 'excel') {
+    const content = `\uFEFF${rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join('\t')).join('\n')}`;
+    const url = URL.createObjectURL(new Blob([content], { type: 'application/vnd.ms-excel;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `alpha-gym-accounting-${from.year}-${from.month}-${from.day}.xls`;
+    link.click();
+    URL.revokeObjectURL(url);
+    return;
+  }
+  const printableRows = rows.slice(3).map((row) => `<tr>${row.map((cell) => `<td>${String(cell).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] || c))}</td>`).join('')}</tr>`).join('');
+  const printWindow = window.open('', '_blank', 'width=1000,height=700');
+  if (!printWindow) return;
+  printWindow.document.write(`<html dir="rtl"><head><title>گزارش حسابداری Alpha Gym</title><style>body{font-family:Tahoma,Arial;padding:32px;color:#222}h1{font-size:22px}table{border-collapse:collapse;width:100%;margin-top:24px}td{border:1px solid #ccc;padding:8px;text-align:right}tr:nth-child(1){background:#f1f1f1;font-weight:bold}</style></head><body><h1>گزارش حسابداری Alpha Gym</h1><p>بازه: ${rows[1][1]} تا ${rows[1][2]}</p><table>${printableRows}</table></body></html>`);
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.print();
+}
+
 export default function Accounting() {
   const [data, setData] = useState<AccountingSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -53,6 +81,7 @@ export default function Accounting() {
     return { ...today, day: 1 };
   });
   const [toDate, setToDate] = useState<JalaliDate>(() => todayJalali());
+  const [outputFormat, setOutputFormat] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,8 +109,26 @@ export default function Accounting() {
           <h1 className="page-title">حسابداری</h1>
           <p className="page-subtitle">درآمد، سهم مربی، پرداخت‌ها، هزینه و گردش حساب</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className="btn-outline" onClick={load}>
+        <div className="flex flex-wrap gap-2 items-center">
+          <label className="sr-only" htmlFor="accounting-output">نوع خروجی</label>
+          <div className="relative">
+            <Download size={15} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--accent)' }} />
+            <select
+              id="accounting-output"
+              className="input-field pr-9 min-w-[150px]"
+              value={outputFormat}
+              onChange={(e) => {
+                const value = e.target.value;
+                setOutputFormat('');
+                if (value && data) downloadReport(data, fromDate, toDate, value as 'excel' | 'pdf');
+              }}
+            >
+              <option value="">دانلود گزارش</option>
+              <option value="excel">Excel</option>
+              <option value="pdf">PDF / چاپ</option>
+            </select>
+          </div>
+          <button type="button" className="btn-outline" onClick={load} title="بروزرسانی گزارش">
             <RefreshCcw size={16} />
             بروزرسانی
           </button>
@@ -96,12 +143,16 @@ export default function Accounting() {
         </div>
       </div>
 
-      <div className="panel-card p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_auto] gap-3 items-end">
-        <JalaliDatePicker label="از تاریخ" value={fromDate} onChange={(d) => d && setFromDate(d)} required />
-        <JalaliDatePicker label="تا تاریخ" value={toDate} onChange={(d) => d && setToDate(d)} required />
-        <button type="button" className="btn-outline h-11" onClick={load}>اعمال بازه</button>
-        <p className="text-xs sm:col-span-2 lg:col-span-3" style={{ color: 'var(--text-muted)' }}>
-          تمام تاریخ‌های گزارش به‌صورت شمسی نمایش داده می‌شوند؛ داده‌ها در دیتابیس با قالب استاندارد میلادی ذخیره می‌شوند.
+      <div className="panel-card p-4">
+        <div className="flex flex-col lg:flex-row lg:items-end gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 flex-1">
+            <JalaliDatePicker label="از تاریخ" value={fromDate} onChange={(d) => d && setFromDate(d)} required />
+            <JalaliDatePicker label="تا تاریخ" value={toDate} onChange={(d) => d && setToDate(d)} required />
+          </div>
+          <button type="button" className="btn-primary h-11 shrink-0" onClick={load}>نمایش گزارش</button>
+        </div>
+        <p className="text-xs mt-3" style={{ color: 'var(--text-muted)' }}>
+          تاریخ‌ها فقط از تقویم شمسی انتخاب می‌شوند و در گزارش نیز به‌صورت جلالی نمایش داده خواهند شد.
         </p>
       </div>
 
@@ -613,7 +664,7 @@ function PaymentModal({
   const [amount, setAmount] = useState('');
   const [title, setTitle] = useState('');
   const [coachId, setCoachId] = useState('');
-  const [paidAt, setPaidAt] = useState(new Date().toISOString().slice(0, 10));
+  const [paidAt, setPaidAt] = useState<JalaliDate>(() => todayJalali());
   const [saving, setSaving] = useState(false);
 
   return (
@@ -630,7 +681,7 @@ function PaymentModal({
             direction,
             coach_id: coachId ? Number(coachId) : null,
             title: title || undefined,
-            paid_at: paidAt,
+            paid_at: jalaliToGregorianIso(paidAt),
           });
           setSaving(false);
         }}
@@ -678,10 +729,7 @@ function PaymentModal({
               </select>
             </div>
           )}
-          <div>
-            <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>تاریخ</label>
-            <input className="input-field" type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} />
-          </div>
+          <JalaliDatePicker label="تاریخ پرداخت" value={paidAt} onChange={(d) => d && setPaidAt(d)} required />
         </div>
         <div className="px-5 py-4 flex flex-row-reverse gap-2" style={{ background: 'var(--bg-muted)' }}>
           <button type="submit" className="btn-primary" disabled={saving}>{saving ? '...' : 'ثبت'}</button>
@@ -702,7 +750,7 @@ function ExpenseModal({
   const [category, setCategory] = useState('عمومی');
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
-  const [spentAt, setSpentAt] = useState(new Date().toISOString().slice(0, 10));
+  const [spentAt, setSpentAt] = useState<JalaliDate>(() => todayJalali());
   const [saving, setSaving] = useState(false);
 
   return (
@@ -713,7 +761,7 @@ function ExpenseModal({
         onSubmit={async (e) => {
           e.preventDefault();
           setSaving(true);
-          await onSave({ category, title, amount: Number(amount) || 0, spent_at: spentAt });
+          await onSave({ category, title, amount: Number(amount) || 0, spent_at: jalaliToGregorianIso(spentAt) });
           setSaving(false);
         }}
       >
@@ -738,10 +786,7 @@ function ExpenseModal({
             <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>مبلغ (تومان)</label>
             <input className="input-field" type="number" required value={amount} onChange={(e) => setAmount(e.target.value)} />
           </div>
-          <div>
-            <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>تاریخ</label>
-            <input className="input-field" type="date" value={spentAt} onChange={(e) => setSpentAt(e.target.value)} />
-          </div>
+          <JalaliDatePicker label="تاریخ هزینه" value={spentAt} onChange={(d) => d && setSpentAt(d)} required />
         </div>
         <div className="px-5 py-4 flex flex-row-reverse gap-2" style={{ background: 'var(--bg-muted)' }}>
           <button type="submit" className="btn-primary" disabled={saving}>{saving ? '...' : 'ثبت'}</button>
