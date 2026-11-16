@@ -14,6 +14,7 @@ const crypto = require('crypto');
 module.exports = function registerAttendanceScan(app, db, opts = {}) {
   const requireAuth = typeof opts.requireAuth === 'function' ? opts.requireAuth : (_q, _s, n) => n();
   const requireAdmin = typeof opts.requireAdmin === 'function' ? opts.requireAdmin : (_q, _s, n) => n();
+  const audit = typeof opts.audit === 'function' ? opts.audit : () => {};
   const PORT = opts.PORT || 3001;
   const AGENT_KEY = String(process.env.AGENT_KEY || 'alpha-gym-agent').trim();
 
@@ -41,6 +42,18 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
       created_at TEXT DEFAULT (datetime('now')),
       last_used_at TEXT,
       UNIQUE (kind, value)
+    );
+    CREATE TABLE IF NOT EXISTS credential_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      credential_id INTEGER,
+      member_id INTEGER,
+      action TEXT NOT NULL,
+      kind TEXT,
+      value TEXT,
+      actor_id INTEGER,
+      actor_name TEXT,
+      detail TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_credentials_value ON member_credentials (kind, value);
 
@@ -684,7 +697,7 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
     res.json({ member, credentials: credentialsFor(memberId), pending_enrollments: pending });
   });
 
-  app.post('/members/:id/credentials', requireAuth, (req, res) => {
+  app.post('/members/:id/credentials', requireAuth, requireAdmin, (req, res) => {
     const memberId = Number(req.params.id);
     const member = db.prepare('SELECT id, name FROM members WHERE id = ?').get(memberId);
     if (!member) return res.status(404).json({ error: 'Member not found' });
@@ -703,21 +716,23 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
     const info = db.prepare(
       'INSERT INTO member_credentials (member_id, kind, value, label, device_id) VALUES (?, ?, ?, ?, ?)'
     ).run(memberId, kind, value, req.body.label ? String(req.body.label) : null, req.body.device_id ? String(req.body.device_id) : null);
+    audit(req, 'credential.create', { entityType: 'member_credential', entityId: info.lastInsertRowid, memberId, detail: { kind, value, device_id: req.body.device_id || null } });
     res.status(201).json(db.prepare('SELECT * FROM member_credentials WHERE id = ?').get(info.lastInsertRowid));
   });
 
-  app.delete('/credentials/:id', requireAuth, (req, res) => {
+  app.delete('/credentials/:id', requireAuth, requireAdmin, (req, res) => {
     const id = Number(req.params.id);
     const row = db.prepare('SELECT * FROM member_credentials WHERE id = ?').get(id);
     if (!row) return res.status(404).json({ error: 'Credential not found' });
     db.prepare('DELETE FROM member_credentials WHERE id = ?').run(id);
+    audit(req, 'credential.delete', { entityType: 'member_credential', entityId: id, memberId: row.member_id, detail: { kind: row.kind, value: row.value } });
     res.json({ ok: true, deleted: id, kind: row.kind, value: row.value });
   });
 
   /* ------------------------------------------------------------------ *
    *  ENROLLMENT (panel -> agent)
    * ------------------------------------------------------------------ */
-  app.post('/credentials/enroll', requireAuth, (req, res) => {
+  app.post('/credentials/enroll', requireAuth, requireAdmin, (req, res) => {
     const memberId = Number(req.body && req.body.member_id);
     const kind = normKind((req.body && req.body.kind) || 'finger');
     const deviceId = req.body && req.body.device_id ? String(req.body.device_id).trim() : null;
@@ -735,9 +750,8 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
 
     let fohId = member.legacy_person_id ? String(member.legacy_person_id).trim() : '';
     if (!fohId) {
-      // fingerprint device stores numeric ids; reserve a private high range
+      // Reserve a temporary device id without mutating the member's legacy mapping.
       fohId = String(900000 + Number(member.id));
-      db.prepare('UPDATE members SET legacy_person_id = ? WHERE id = ?').run(fohId, member.id);
     }
 
     const ttl = Math.min(900, Math.max(30, Number(req.body && req.body.ttl_seconds) || 180));
@@ -760,7 +774,7 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
     });
   });
 
-  app.get('/credentials/enrollments', requireAuth, (req, res) => {
+  app.get('/credentials/enrollments', requireAuth, requireAdmin, (req, res) => {
     expireEnrollments();
     const rows = db.prepare(
       `SELECT e.*, m.name AS member_name, m.member_code
@@ -771,7 +785,7 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
     res.json(rows);
   });
 
-  app.post('/credentials/enrollments/:id/cancel', requireAuth, (req, res) => {
+  app.post('/credentials/enrollments/:id/cancel', requireAuth, requireAdmin, (req, res) => {
     const id = Number(req.params.id);
     const row = db.prepare('SELECT * FROM credential_enrollments WHERE id = ?').get(id);
     if (!row) return res.status(404).json({ error: 'Enrollment not found' });
@@ -850,7 +864,7 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
     res.json(rows);
   });
 
-  app.post('/attendance/unknown/:id/resolve', requireAuth, (req, res) => {
+  app.post('/attendance/unknown/:id/resolve', requireAuth, requireAdmin, (req, res) => {
     const id = Number(req.params.id);
     const memberId = Number(req.body && req.body.member_id);
     const row = db.prepare('SELECT * FROM unknown_scans WHERE id = ?').get(id);
@@ -864,9 +878,10 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
         'SELECT id FROM member_credentials WHERE kind = ? AND value = ? COLLATE NOCASE'
       ).get(kind, value);
       if (!dup) {
-        db.prepare(
+        const info = db.prepare(
           'INSERT INTO member_credentials (member_id, kind, value, label, device_id) VALUES (?, ?, ?, ?, ?)'
         ).run(memberId, kind, value, 'از تردد ناشناس', row.device_id || null);
+        audit(req, 'credential.create_from_unknown_scan', { entityType: 'member_credential', entityId: info.lastInsertRowid, memberId, detail: { kind, value, unknown_scan_id: id } });
       }
     }
     db.prepare(
@@ -875,7 +890,7 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
     res.json({ ok: true, member_id: memberId, member_name: member.name });
   });
 
-  app.delete('/attendance/unknown/:id', requireAuth, (req, res) => {
+  app.delete('/attendance/unknown/:id', requireAuth, requireAdmin, (req, res) => {
     const id = Number(req.params.id);
     db.prepare(
       "UPDATE unknown_scans SET resolved_at = datetime('now') WHERE id = ?"

@@ -554,7 +554,7 @@ function PaymentsTable({
       <table className="w-full min-w-[640px]">
         <thead>
           <tr style={{ background: 'var(--bg-muted)' }}>
-            {['تاریخ', 'شرح تراکنش', 'نوع عملیات', 'روش پرداخت', 'دریافت/پرداخت', 'مبلغ', ''].map((h) => (
+            {['تاریخ', 'شرح تراکنش', 'نوع عملیات', 'روش پرداخت', 'مربی / سهم', 'دریافت/پرداخت', 'مبلغ', ''].map((h) => (
               <th key={h || 'a'} className="text-right text-xs px-4 py-3" style={{ color: 'var(--text-secondary)' }}>
                 {h}
               </th>
@@ -564,7 +564,7 @@ function PaymentsTable({
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={7} className="text-center py-10 text-sm" style={{ color: 'var(--text-muted)' }}>
+              <td colSpan={8} className="text-center py-10 text-sm" style={{ color: 'var(--text-muted)' }}>
                 پرداختی ثبت نشده
               </td>
             </tr>
@@ -582,6 +582,10 @@ function PaymentsTable({
                 </td>
                 <td className="px-4 py-3">
                   <span className="badge badge-info">{paymentMethodLabel(p.method)}</span>
+                </td>
+                <td className="px-4 py-3">
+                  <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{p.coach_name || 'بدون مربی'}</div>
+                  {p.coach_share_amount ? <div className="text-[11px] mt-1" style={{ color: 'var(--gold)' }}>{fmt(p.coach_share_amount)} ({fmt(p.coach_share_percent || 0)}٪)</div> : null}
                 </td>
                 <td className="px-4 py-3">
                   <span className={`badge ${p.direction === 'in' ? 'badge-success' : 'badge-danger'}`}>

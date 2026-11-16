@@ -389,6 +389,16 @@ db.exec(`
   )
 `);
 
+// Snapshot fields keep historical coach calculations stable after settings change.
+for (const [column, definition] of [
+  ['coach_name_snapshot', 'TEXT'],
+  ['coach_share_percent', 'REAL NOT NULL DEFAULT 0'],
+  ['coach_share_amount', 'INTEGER NOT NULL DEFAULT 0'],
+]) {
+  const cols = db.prepare('PRAGMA table_info(payments)').all().map((c) => c.name);
+  if (!cols.includes(column)) db.exec(`ALTER TABLE payments ADD COLUMN ${column} ${definition}`);
+}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS expenses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1613,7 +1623,12 @@ function recordPayment({ member_id, member_name, sport, amount, type = 'renewal'
   } else if (sport) {
     coach = coachForSport(String(sport));
   }
+  let coachName = null;
+  let sharePercent = 0;
   if (coach && coach.coach_id) {
+    const coachRow = db.prepare('SELECT name, default_share FROM coaches WHERE id = ?').get(Number(coach.coach_id));
+    coachName = coachRow ? coachRow.name : null;
+    sharePercent = Number(coach.commission_percent || (coachRow && coachRow.default_share) || 0) || 0;
     share = coach_share != null
       ? Math.max(0, Number(coach_share) || 0)
       : (coach.commission_amount != null && coach.commission_amount > 0
@@ -1621,13 +1636,16 @@ function recordPayment({ member_id, member_name, sport, amount, type = 'renewal'
         : Math.round((amt * (coach.commission_percent || 0)) / 100));
   }
   const res = db.prepare(`
-    INSERT INTO payments (member_id, member_name, sport, coach_id, coach_share, amount, type, method, note, received_by, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO payments (member_id, member_name, sport, coach_id, coach_share, coach_name_snapshot, coach_share_percent, coach_share_amount, amount, type, method, note, received_by, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     member_id != null ? Number(member_id) : null,
     member_name ? String(member_name) : null,
     sport ? String(sport) : null,
     coach && coach.coach_id ? Number(coach.coach_id) : null,
+    share,
+    coachName,
+    sharePercent,
     share,
     amt,
     type,
@@ -1636,7 +1654,7 @@ function recordPayment({ member_id, member_name, sport, amount, type = 'renewal'
     received_by ? String(received_by) : null,
     created_at || new Date().toISOString().slice(0, 19).replace('T', ' ')
   );
-  return { id: res.lastInsertRowid, coach_id: coach && coach.coach_id ? Number(coach.coach_id) : null, coach_share: share };
+  return { id: res.lastInsertRowid, coach_id: coach && coach.coach_id ? Number(coach.coach_id) : null, coach_share: share, coach_name: coachName, coach_share_percent: sharePercent };
 }
 
 /* =========================
@@ -1991,6 +2009,9 @@ app.put('/members/:id', requireAuth, (req, res) => {
   const codeInput = (member_code !== undefined && member_code !== null && String(member_code).trim() !== '')
     ? member_code
     : personnel_code;
+  if (codeInput !== undefined && codeInput !== null && String(codeInput).trim() !== String(existing.member_code || '').trim() && req.staff?.role !== 'admin') {
+    return res.status(403).json({ error: 'تغییر کد عضویت فقط با دسترسی مدیر سیستم مجاز است' });
+  }
   if (codeInput !== undefined && codeInput !== null && String(codeInput).trim() !== '') {
     const code = String(codeInput).trim();
     if (!/^\d{1,15}$/.test(code)) {
@@ -2179,7 +2200,7 @@ app.put('/members/:id', requireAuth, (req, res) => {
   }
 });
 
-app.delete('/members/:id', requireAuth, (req, res) => {
+app.delete('/members/:id', requireAuth, requireAdmin, (req, res) => {
   const id = Number(req.params.id);
 
   try {
@@ -2597,6 +2618,9 @@ function mapPaymentRow(p) {
     method: p.method || 'cash',
     member_id: p.member_id ?? null,
     coach_id: p.coach_id ?? null,
+    coach_name: p.coach_name_snapshot || null,
+    coach_share_percent: Number(p.coach_share_percent) || 0,
+    coach_share_amount: Number(p.coach_share_amount ?? p.coach_share) || 0,
     title: p.title || p.member_name || p.note || null,
     notes: p.note || null,
     paid_at: p.paid_at || String(p.created_at || '').slice(0, 10),
@@ -2816,6 +2840,7 @@ app.post('/accounting/payments', accountingGuards, (req, res) => {
         method: ['cash', 'card', 'transfer', 'pos', 'other'].includes(String(method)) ? String(method) : 'cash',
         note: note ? String(note).trim() : null,
         received_by: req.staff.full_name,
+        coach_id: coach_id != null && coach_id !== '' ? Number(coach_id) : null,
         created_at: date ? `${String(date).slice(0, 10)} ${new Date().toISOString().slice(11, 19)}` : undefined,
       });
       const dir = direction === 'out' || typeStr === 'coach_payout' ? 'out' : 'in';
@@ -4937,7 +4962,7 @@ app.get('/system/backup/stats', requireAuth, requireAdmin, (_req, res) => {
   }
 });
 
-require('./attendanceScan')(app, db, { requireAuth, requireAdmin, PORT });
+require('./attendanceScan')(app, db, { requireAuth, requireAdmin, audit, PORT });
 require('./personnelAttendance')(app, db, { requireAuth, requireAdmin, audit });
 require('./statsPublic')(app, db);
 

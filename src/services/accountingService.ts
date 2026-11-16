@@ -38,6 +38,9 @@ export interface Payment {
   method?: 'cash' | 'card' | 'transfer' | 'pos' | 'gateway' | 'other' | string;
   member_id?: number | null;
   coach_id?: number | null;
+  coach_name?: string | null;
+  coach_share_percent?: number;
+  coach_share_amount?: number;
   title?: string | null;
   notes?: string | null;
   paid_at: string;

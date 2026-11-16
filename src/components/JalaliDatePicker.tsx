@@ -124,7 +124,7 @@ export default function JalaliDatePicker({
   const years = Array.from({ length: 80 }, (_, i) => today.year - 60 + i);
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className="relative" style={{ zIndex: open ? 200 : 1 }}>
       <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
         {label}
         {required && <span style={{ color: 'var(--danger)' }}> *</span>}
@@ -173,6 +173,8 @@ export default function JalaliDatePicker({
             border: '1px solid var(--border)',
             boxShadow: 'var(--shadow)',
             right: 0,
+            maxHeight: 'min(430px, calc(100vh - 24px))',
+            overflowY: 'auto',
           }}
         >
           {/* Header: month / year */}
