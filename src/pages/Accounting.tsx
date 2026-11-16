@@ -22,6 +22,7 @@ import {
   X,
   RefreshCcw,
   PieChart,
+  BarChart3,
   Download,
 } from 'lucide-react';
 
@@ -237,6 +238,7 @@ export default function Accounting() {
       )}
 
       {!loading && data && tab === 'overview' && (
+        <>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="panel-card p-5">
             <h3 className="section-title mb-4 flex items-center gap-2">
@@ -266,6 +268,8 @@ export default function Accounting() {
             </div>
           </div>
         </div>
+        <AnalyticsPanel analytics={data.analytics} />
+        </>
       )}
 
       {!loading && data && tab === 'specialty' && (
@@ -540,6 +544,68 @@ function FlowRow({
       </span>
     </div>
   );
+}
+
+function AnalyticsPanel({ analytics }: { analytics: AccountingSummary['analytics'] }) {
+  const trend = analytics?.monthly_trend || [];
+  const maxTrend = Math.max(1, ...trend.flatMap((x) => [x.income, x.payout, x.expense]));
+  const paymentMix = analytics?.payment_mix || [];
+  const expenseMix = analytics?.expense_mix || [];
+  const maxPayment = Math.max(1, ...paymentMix.map((x) => x.amount));
+  const maxExpense = Math.max(1, ...expenseMix.map((x) => x.amount));
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="panel-card p-5 lg:col-span-2">
+          <h3 className="section-title mb-1 flex items-center gap-2"><BarChart3 size={16} style={{ color: 'var(--accent)' }} />روند ماهانه جریان مالی</h3>
+          <p className="text-xs mb-5" style={{ color: 'var(--text-muted)' }}>بر مبنای دریافت، پرداخت و هزینه واقعی ثبت‌شده</p>
+          {trend.length === 0 ? <EmptyAnalytics /> : <div className="space-y-4">{trend.map((row) => (
+            <div key={row.month}>
+              <div className="flex justify-between text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>
+                <span>{formatJalali(`${row.month}-01`)}</span>
+                <strong style={{ color: row.net >= 0 ? 'var(--success)' : 'var(--danger)' }}>خالص: {fmt(row.net)}</strong>
+              </div>
+              <div className="space-y-1">
+                <MetricBar label="دریافت" value={row.income} max={maxTrend} color="var(--success)" />
+                <MetricBar label="پرداخت" value={row.payout} max={maxTrend} color="var(--warning)" />
+                <MetricBar label="هزینه" value={row.expense} max={maxTrend} color="var(--danger)" />
+              </div>
+            </div>
+          ))}</div>}
+        </div>
+        <div className="panel-card p-5">
+          <h3 className="section-title mb-1">شاخص‌های عملکرد</h3>
+          <p className="text-xs mb-5" style={{ color: 'var(--text-muted)' }}>خلاصه بازه انتخاب‌شده</p>
+          <div className="space-y-3">
+            <Insight label="خالص واقعی" value={`${fmt(analytics?.actual_net || 0)} تومان`} tone={(analytics?.actual_net || 0) >= 0 ? 'success' : 'danger'} />
+            <Insight label="حاشیه سود نقدی" value={`${fmt(analytics?.profit_margin || 0)}٪`} tone="accent" />
+            <Insight label="ماه‌های دارای تراکنش" value={fmt(trend.length)} tone="gold" />
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <MixCard title="ترکیب روش دریافت/پرداخت" rows={paymentMix} max={maxPayment} />
+        <MixCard title="ترکیب هزینه‌ها" rows={expenseMix} max={maxExpense} danger />
+      </div>
+    </div>
+  );
+}
+
+function MetricBar({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
+  return <div className="flex items-center gap-2 text-[11px]"><span className="w-12" style={{ color: 'var(--text-muted)' }}>{label}</span><div className="h-2 rounded-full overflow-hidden flex-1" style={{ background: 'var(--bg-muted)' }}><div className="h-full rounded-full" style={{ width: `${Math.min(100, (value / max) * 100)}%`, background: color }} /></div><span className="w-24 text-left" style={{ color: 'var(--text-secondary)' }}>{fmt(value)}</span></div>;
+}
+
+function MixCard({ title, rows, max, danger = false }: { title: string; rows: { label: string; count: number; amount: number }[]; max: number; danger?: boolean }) {
+  return <div className="panel-card p-5"><h3 className="section-title mb-4">{title}</h3>{rows.length === 0 ? <EmptyAnalytics /> : <div className="space-y-3">{rows.slice(0, 8).map((row) => <div key={row.label}><div className="flex justify-between text-xs mb-1" style={{ color: 'var(--text-secondary)' }}><span>{row.label}</span><span>{fmt(row.amount)} تومان · {fmt(row.count)} مورد</span></div><div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--bg-muted)' }}><div className="h-full rounded-full" style={{ width: `${Math.min(100, (row.amount / max) * 100)}%`, background: danger ? 'var(--danger)' : 'var(--accent)' }} /></div></div>)}</div>}</div>;
+}
+
+function Insight({ label, value, tone }: { label: string; value: string; tone: 'success' | 'danger' | 'accent' | 'gold' }) {
+  const color = tone === 'success' ? 'var(--success)' : tone === 'danger' ? 'var(--danger)' : tone === 'gold' ? 'var(--gold)' : 'var(--accent)';
+  return <div className="p-4 rounded-xl" style={{ background: 'var(--bg-muted)' }}><p className="text-xs" style={{ color: 'var(--text-muted)' }}>{label}</p><p className="text-lg font-bold mt-1" style={{ color }}>{value}</p></div>;
+}
+
+function EmptyAnalytics() {
+  return <div className="py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>در این بازه داده‌ای برای تحلیل ثبت نشده است</div>;
 }
 
 function PaymentsTable({

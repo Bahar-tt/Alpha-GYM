@@ -2731,6 +2731,57 @@ app.get('/accounting/summary', accountingGuards, (req, res) => {
     const paymentsOut = payments.filter((p) => p.direction === 'out').reduce((s, p) => s + p.amount, 0);
     const expenseTotal = expenses.reduce((s, e) => s + e.amount, 0);
 
+    // گزارش تحلیلی بر اساس جریان نقدی واقعیِ همان بازه؛ مستقل از سقف ۳۰۰ ردیف جدول.
+    const monthlyTrend = db.prepare(`
+      SELECT month,
+             SUM(income) AS income,
+             SUM(payout) AS payout,
+             SUM(expense) AS expense
+      FROM (
+        SELECT substr(COALESCE(paid_at, created_at), 1, 7) AS month,
+               CASE WHEN direction = 'in' THEN amount ELSE 0 END AS income,
+               CASE WHEN direction = 'out' THEN amount ELSE 0 END AS payout,
+               0 AS expense
+        FROM payments
+        WHERE substr(COALESCE(paid_at, created_at), 1, 10) BETWEEN ? AND ?
+        UNION ALL
+        SELECT substr(COALESCE(date, spent_at, created_at), 1, 7) AS month,
+               0 AS income, 0 AS payout, amount AS expense
+        FROM expenses
+        WHERE substr(COALESCE(date, spent_at, created_at), 1, 10) BETWEEN ? AND ?
+      )
+      GROUP BY month
+      ORDER BY month
+    `).all(f, t, f, t).map((r) => ({
+      month: r.month,
+      income: Number(r.income) || 0,
+      payout: Number(r.payout) || 0,
+      expense: Number(r.expense) || 0,
+      net: (Number(r.income) || 0) - (Number(r.payout) || 0) - (Number(r.expense) || 0),
+    }));
+    const paymentMix = db.prepare(`
+      SELECT COALESCE(NULLIF(TRIM(method), ''), 'ثبت نشده') AS label,
+             COUNT(*) AS count, COALESCE(SUM(amount), 0) AS amount
+      FROM payments
+      WHERE substr(COALESCE(paid_at, created_at), 1, 10) BETWEEN ? AND ?
+      GROUP BY label ORDER BY amount DESC
+    `).all(f, t).map((r) => ({ label: r.label, count: Number(r.count) || 0, amount: Number(r.amount) || 0 }));
+    const expenseMix = db.prepare(`
+      SELECT COALESCE(NULLIF(TRIM(category), ''), 'عمومی') AS label,
+             COUNT(*) AS count, COALESCE(SUM(amount), 0) AS amount
+      FROM expenses
+      WHERE substr(COALESCE(date, spent_at, created_at), 1, 10) BETWEEN ? AND ?
+      GROUP BY label ORDER BY amount DESC
+    `).all(f, t).map((r) => ({ label: r.label, count: Number(r.count) || 0, amount: Number(r.amount) || 0 }));
+    const actualNet = paymentsIn - paymentsOut - expenseTotal;
+    const analytics = {
+      monthly_trend: monthlyTrend,
+      payment_mix: paymentMix,
+      expense_mix: expenseMix,
+      actual_net: actualNet,
+      profit_margin: paymentsIn > 0 ? Math.round((actualNet / paymentsIn) * 1000) / 10 : 0,
+    };
+
     const ledger = [
       ...payments.map((p) => ({
         id: `p${p.id}`,
@@ -2769,6 +2820,7 @@ app.get('/accounting/summary', accountingGuards, (req, res) => {
       },
       by_specialty: bySpecialty,
       by_coach: byCoach,
+      analytics,
       payments,
       expenses,
       ledger,

@@ -66,10 +66,19 @@ export interface LedgerItem {
   date: string;
 }
 
+export interface AccountingAnalytics {
+  monthly_trend: { month: string; income: number; payout: number; expense: number; net: number }[];
+  payment_mix: { label: string; count: number; amount: number }[];
+  expense_mix: { label: string; count: number; amount: number }[];
+  actual_net: number;
+  profit_margin: number;
+}
+
 export interface AccountingSummary {
   totals: AccountingTotals;
   by_specialty: SpecialtyRow[];
   by_coach: CoachShareRow[];
+  analytics: AccountingAnalytics;
   payments: Payment[];
   expenses: Expense[];
   ledger: LedgerItem[];
