@@ -127,6 +127,8 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
   ensureColumn('members', 'legacy_person_id', 'TEXT');
   ensureColumn('attendances', 'sport', 'TEXT');
   ensureColumn('attendances', 'credential_kind', 'TEXT');
+  ensureColumn('attendances', 'direction', "TEXT NOT NULL DEFAULT 'check_in'");
+  ensureColumn('scan_events', 'direction', "TEXT NOT NULL DEFAULT 'check_in'");
   try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_members_legacy ON members (legacy_person_id)');
   } catch (_e) { /* ignore */ }
@@ -230,8 +232,8 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
         `INSERT INTO scan_events
            (member_id, member_name, member_code, phone, sport, credential_kind,
             credential_value, device_id, device_name, attendance_id, status,
-            duplicate, expired, total_sessions, used_sessions, remaining, message)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            duplicate, expired, total_sessions, used_sessions, remaining, message, direction)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         data.member_id != null ? Number(data.member_id) : null,
         data.member_name || null,
@@ -249,7 +251,8 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
         data.total_sessions != null ? Number(data.total_sessions) : null,
         data.used_sessions != null ? Number(data.used_sessions) : null,
         data.remaining != null ? Number(data.remaining) : null,
-        data.message || null
+        data.message || null,
+        data.direction || 'check_in'
       );
       // Keep the feedback table tiny even after months of use.
       if (Math.random() < 0.02) {
@@ -416,10 +419,11 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
     try {
       const member = resolved.member;
 
-      // duplicate suppression (same member within 45 seconds)
+      // A short retry window protects against transport retries. After that,
+      // the next scan toggles between check-in and check-out.
       const recent = db.prepare(
         `SELECT * FROM attendances
-         WHERE member_id = ? AND datetime(COALESCE(attended_at, 'now')) >= datetime('now', '-45 seconds')
+         WHERE member_id = ? AND datetime(COALESCE(attended_at, 'now')) >= datetime('now', '-5 seconds')
          ORDER BY id DESC LIMIT 1`
       ).get(member.id);
       if (recent) {
@@ -442,6 +446,7 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
           attendance_id: recent.id,
           status: 'duplicate',
           duplicate: true,
+          direction: recent.direction || 'check_in',
           expired,
           total_sessions: total,
           used_sessions: used,
@@ -459,10 +464,19 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
           remaining: sportRow ? remainingOf(sportRow) : remaining,
           expired,
           matched_by: resolved.matched,
+          direction: recent.direction || 'check_in',
         });
       }
 
       const sportRow = selectSport(member.id, b.sport, deviceId);
+      const lastAttendance = db.prepare(
+        'SELECT direction, attended_at FROM attendances WHERE member_id = ? ORDER BY id DESC LIMIT 1'
+      ).get(member.id);
+      const direction = lastAttendance
+        && lastAttendance.direction === 'check_in'
+        && String(lastAttendance.attended_at || '').slice(0, 10) === todayIso()
+        ? 'check_out'
+        : 'check_in';
 
       let attendedAt = null;
       if (b.scan_time && !Number.isNaN(Date.parse(b.scan_time))) {
@@ -470,32 +484,34 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
       }
 
       const insert = db.prepare(
-        `INSERT INTO attendances (member_id, member_code, attended_at, source, device_id, sport, credential_kind)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO attendances (member_id, member_code, attended_at, source, device_id, sport, credential_kind, direction)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       );
       const info = attendedAt
-        ? insert.run(member.id, member.member_code || rawValue || null, attendedAt, source, deviceId, sportRow ? sportRow.sport || '' : '', resolved.kind)
+        ? insert.run(member.id, member.member_code || rawValue || null, attendedAt, source, deviceId, sportRow ? sportRow.sport || '' : '', resolved.kind, direction)
         : db.prepare(
-          `INSERT INTO attendances (member_id, member_code, source, device_id, sport, credential_kind)
-           VALUES (?, ?, ?, ?, ?, ?)`
-        ).run(member.id, member.member_code || rawValue || null, source, deviceId, sportRow ? sportRow.sport || '' : '', resolved.kind);
+          `INSERT INTO attendances (member_id, member_code, source, device_id, sport, credential_kind, direction)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        ).run(member.id, member.member_code || rawValue || null, source, deviceId, sportRow ? sportRow.sport || '' : '', resolved.kind, direction);
 
-      if (sportRow) {
+      if (direction === 'check_in' && sportRow) {
         db.prepare(
           'UPDATE member_sports SET used_sessions = COALESCE(used_sessions, 0) + 1 WHERE id = ?'
         ).run(sportRow.id);
       }
-      db.prepare(
-        'UPDATE members SET used_sessions = COALESCE(used_sessions, 0) + 1 WHERE id = ?'
-      ).run(member.id);
+      if (direction === 'check_in') {
+        db.prepare(
+          'UPDATE members SET used_sessions = COALESCE(used_sessions, 0) + 1 WHERE id = ?'
+        ).run(member.id);
+      }
 
       const expired = member.expiry_date ? String(member.expiry_date) < todayIso() : false;
       const sportName = sportRow ? String(sportRow.sport || '') : '';
-      const remaining = sportRow ? remainingOf({ ...sportRow, used_sessions: (Number(sportRow.used_sessions) || 0) + 1 }) : null;
+      const remaining = sportRow ? remainingOf({ ...sportRow, used_sessions: (Number(sportRow.used_sessions) || 0) + (direction === 'check_in' ? 1 : 0) }) : null;
       const updatedMember = db.prepare('SELECT * FROM members WHERE id = ?').get(member.id) || member;
       const totalSessions = sportRow ? Number(sportRow.total_sessions) || 0 : Number(updatedMember.total_sessions) || 0;
       const usedSessions = sportRow
-        ? (Number(sportRow.used_sessions) || 0) + 1
+        ? (Number(sportRow.used_sessions) || 0) + (direction === 'check_in' ? 1 : 0)
         : Number(updatedMember.used_sessions) || 0;
       logScanEvent({
         member_id: member.id,
@@ -510,26 +526,32 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
         attendance_id: info.lastInsertRowid,
         status: 'matched',
         duplicate: false,
+        direction,
         expired,
         total_sessions: totalSessions,
         used_sessions: usedSessions,
         remaining: totalSessions ? Math.max(0, totalSessions - usedSessions) : null,
-        message: expired
-          ? `تردد ${member.name} ثبت شد (عضویت منقضی است)`
-          : `تردد ${member.name} ثبت شد${sportName ? ' - ' + sportName : ''}`,
+        message: direction === 'check_out'
+          ? `خروج ${member.name} ثبت شد`
+          : expired
+            ? `ورود ${member.name} ثبت شد (عضویت منقضی است)`
+            : `ورود ${member.name} ثبت شد${sportName ? ' - ' + sportName : ''}`,
       });
 
       return res.json({
         ok: true,
         success: true,
-        message: expired
-          ? `تردد ${member.name} ثبت شد (عضویت منقضی است)`
-          : `تردد ${member.name} ثبت شد${sportName ? ' - ' + sportName : ''}`,
+        message: direction === 'check_out'
+          ? `خروج ${member.name} ثبت شد`
+          : expired
+            ? `ورود ${member.name} ثبت شد (عضویت منقضی است)`
+            : `ورود ${member.name} ثبت شد${sportName ? ' - ' + sportName : ''}`,
         attendance_id: info.lastInsertRowid,
         member: memberPayload(updatedMember),
         sport: sportName,
         member_sport_id: sportRow ? sportRow.id : null,
         remaining,
+        direction,
         expired,
         matched_by: resolved.matched,
         device_id: deviceId,
@@ -565,6 +587,7 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
         `SELECT a.id, a.member_id, m.name AS member_name, a.member_code,
                 COALESCE(a.sport, '') AS sport,
                 COALESCE(a.source, 'scanner') AS scan_type,
+                COALESCE(a.direction, 'check_in') AS direction,
                 a.device_id, COALESCE(d.name, a.device_id) AS device_name,
                 a.attended_at AS scan_time
          FROM attendances a
@@ -588,6 +611,7 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
         `SELECT a.id, a.member_id, m.name AS member_name, m.phone, a.member_code,
                 COALESCE(a.sport, '') AS sport,
                 COALESCE(a.source, 'scanner') AS scan_type,
+                COALESCE(a.direction, 'check_in') AS direction,
                 a.credential_kind, a.device_id,
                 COALESCE(d.name, a.device_id) AS device_name,
                 m.total_sessions, m.used_sessions,
@@ -598,7 +622,10 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
          ORDER BY datetime(a.attended_at) DESC, a.id DESC
          LIMIT ?`
       ).all(limit);
-      res.json(rows);
+      res.json(rows.map((row) => ({
+        ...row,
+        member: row.member_id ? memberPayload(db.prepare('SELECT * FROM members WHERE id = ?').get(row.member_id)) : null,
+      })));
     } catch (e) {
       console.error(e);
       res.status(500).json({ error: 'Failed to list scans' });
