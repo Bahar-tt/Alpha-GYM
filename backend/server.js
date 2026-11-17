@@ -2065,9 +2065,6 @@ app.put('/members/:id', requireAuth, (req, res) => {
   const codeInput = (member_code !== undefined && member_code !== null && String(member_code).trim() !== '')
     ? member_code
     : personnel_code;
-  if (codeInput !== undefined && codeInput !== null && String(codeInput).trim() !== String(existing.member_code || '').trim() && req.staff?.role !== 'admin') {
-    return res.status(403).json({ error: 'تغییر کد عضویت فقط با دسترسی مدیر سیستم مجاز است' });
-  }
   if (codeInput !== undefined && codeInput !== null && String(codeInput).trim() !== '') {
     const code = String(codeInput).trim();
     if (!/^\d{1,15}$/.test(code)) {
@@ -2256,7 +2253,7 @@ app.put('/members/:id', requireAuth, (req, res) => {
   }
 });
 
-app.delete('/members/:id', requireAuth, requireAdmin, (req, res) => {
+app.delete('/members/:id', requireAuth, (req, res) => {
   const id = Number(req.params.id);
 
   try {
@@ -5184,7 +5181,7 @@ app.get('/system/backup/stats', requireAuth, requireAdmin, (_req, res) => {
   }
 });
 
-require('./attendanceScan')(app, db, { requireAuth, requireAdmin, audit, PORT });
+require('./attendanceScan')(app, db, { requireAuth, requireAdmin, PORT });
 require('./personnelAttendance')(app, db, { requireAuth, requireAdmin, audit });
 require('./statsPublic')(app, db);
 
