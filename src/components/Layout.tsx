@@ -22,11 +22,13 @@ import {
   Settings,
   Bell,
   Sparkles,
+  Fingerprint,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'داشبورد', icon: LayoutDashboard, adminOnly: false },
   { to: '/members', label: 'اعضا', icon: Users, adminOnly: false },
+  { to: '/attendance', label: 'اسکنر اثر انگشت', icon: Fingerprint, adminOnly: false },
   { to: '/renewals', label: 'تمدیدها', icon: RefreshCcw, adminOnly: false },
   { to: '/sms', label: 'مرکز پیامک', icon: MessageSquare, adminOnly: false },
   { to: '/coaches', label: 'مربیان', icon: UserRound, adminOnly: true },
@@ -40,6 +42,7 @@ const NAV_ITEMS = [
 const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'داشبورد',
   '/members': 'مدیریت اعضا',
+  '/attendance': 'اسکنر اثر انگشت',
   '/renewals': 'تمدید عضویت',
   '/sms': 'مرکز پیامک',
   '/coaches': 'مربیان',

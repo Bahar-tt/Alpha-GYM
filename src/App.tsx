@@ -15,6 +15,7 @@ import Settings from './pages/Settings';
 import ReceiptPage from './pages/ReceiptPage';
 import UsersPage from './pages/Users';
 import PersonnelAttendance from './pages/PersonnelAttendance';
+import FingerprintScanner from './pages/FingerprintScanner';
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -42,6 +43,7 @@ function App() {
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="members" element={<Members />} />
+              <Route path="attendance" element={<FingerprintScanner />} />
               <Route path="renewals" element={<Renewals />} />
               <Route path="sms" element={<SmsCenter />} />
               <Route path="messaging" element={<Navigate to="/sms" replace />} />
