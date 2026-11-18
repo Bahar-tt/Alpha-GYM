@@ -641,6 +641,71 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
     }
   });
 
+  app.get('/attendance/report/daily.xlsx', requireAuth, async (req, res) => {
+    try {
+      const requested = String(req.query.date || todayIso()).trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(requested)) return res.status(400).json({ error: 'تاریخ گزارش نامعتبر است' });
+      const rows = db.prepare(
+        `SELECT m.name AS member_name, a.member_code, COALESCE(a.direction, 'check_in') AS direction,
+                COALESCE(a.sport, '') AS sport, COALESCE(a.credential_kind, a.source, 'scanner') AS source,
+                COALESCE(d.name, a.device_id, '') AS device_name, a.attended_at AS scan_time,
+                m.phone, m.expiry_date, m.total_sessions, m.used_sessions
+         FROM attendances a LEFT JOIN members m ON m.id = a.member_id LEFT JOIN devices d ON d.id = a.device_id
+         WHERE date(a.attended_at, 'localtime') = ? ORDER BY datetime(a.attended_at) ASC, a.id ASC`
+      ).all(requested);
+      const ExcelJS = require('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet('گزارش تردد');
+      sheet.views = [{ rightToLeft: true }];
+      sheet.columns = [
+        { header: 'نام عضو', key: 'member_name', width: 26 }, { header: 'کد عضویت', key: 'member_code', width: 16 },
+        { header: 'جهت', key: 'direction', width: 12 }, { header: 'رشته', key: 'sport', width: 22 },
+        { header: 'نوع ثبت', key: 'source', width: 16 }, { header: 'دستگاه', key: 'device_name', width: 20 },
+        { header: 'زمان تهران', key: 'scan_time', width: 24 }, { header: 'تلفن', key: 'phone', width: 18 },
+        { header: 'تاریخ انقضا', key: 'expiry_date', width: 16 }, { header: 'کل جلسات', key: 'total_sessions', width: 12 },
+        { header: 'جلسات مصرف‌شده', key: 'used_sessions', width: 16 }, { header: 'جلسات باقی‌مانده', key: 'remaining', width: 16 },
+      ];
+      rows.forEach((row) => sheet.addRow({ ...row, direction: row.direction === 'check_out' ? 'خروج' : 'ورود', scan_time: new Intl.DateTimeFormat('fa-IR', { dateStyle: 'short', timeStyle: 'medium', timeZone: 'Asia/Tehran' }).format(new Date(row.scan_time)), remaining: Math.max(0, Number(row.total_sessions || 0) - Number(row.used_sessions || 0)) }));
+      sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF111827' } };
+      sheet.autoFilter = { from: 'A1', to: 'L1' };
+      const buffer = await workbook.xlsx.writeBuffer();
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="alpha-gym-attendance-${requested}.xlsx"`);
+      res.send(Buffer.from(buffer));
+    } catch (e) { console.error('[attendance/report/daily.xlsx]', e); res.status(500).json({ error: 'ساخت فایل Excel ناموفق بود' }); }
+  });
+
+  app.get('/attendance/report/daily.pdf', requireAuth, (req, res) => {
+    try {
+      const requested = String(req.query.date || todayIso()).trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(requested)) return res.status(400).json({ error: 'تاریخ گزارش نامعتبر است' });
+      const rows = db.prepare(
+        `SELECT m.name AS member_name, a.member_code, COALESCE(a.direction, 'check_in') AS direction,
+                COALESCE(a.sport, '') AS sport, COALESCE(d.name, a.device_id, '') AS device_name,
+                a.attended_at AS scan_time
+         FROM attendances a LEFT JOIN members m ON m.id = a.member_id LEFT JOIN devices d ON d.id = a.device_id
+         WHERE date(a.attended_at, 'localtime') = ? ORDER BY datetime(a.attended_at) ASC, a.id ASC`
+      ).all(requested);
+      const PDFDocument = require('pdfkit');
+      const doc = new PDFDocument({ size: 'A4', margin: 36, info: { Title: `Alpha GYM Attendance ${requested}` } });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="alpha-gym-attendance-${requested}.pdf"`);
+      doc.pipe(res);
+      const font = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf';
+      try { doc.font(font); } catch (_e) { /* use PDFKit default if unavailable */ }
+      doc.fontSize(16).text('Alpha GYM - Daily Attendance Report');
+      doc.fontSize(10).text(`Date: ${requested} | Tehran time | Records: ${rows.length}`);
+      doc.moveDown();
+      rows.forEach((row, i) => {
+        const time = new Intl.DateTimeFormat('en-GB', { dateStyle: 'short', timeStyle: 'medium', timeZone: 'Asia/Tehran' }).format(new Date(row.scan_time));
+        doc.fontSize(9).text(`${i + 1}. ${row.member_name || 'Unknown'} | ${row.member_code || '-'} | ${row.direction === 'check_out' ? 'EXIT' : 'ENTRY'} | ${row.sport || '-'} | ${time}`);
+        if (doc.y > 760) doc.addPage().font(font);
+      });
+      doc.end();
+    } catch (e) { console.error('[attendance/report/daily.pdf]', e); res.status(500).json({ error: 'ساخت فایل PDF ناموفق بود' }); }
+  });
+
   app.get('/attendance/recent', requireAuth, (req, res) => {
     try {
       const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
