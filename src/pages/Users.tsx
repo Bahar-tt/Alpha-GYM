@@ -13,7 +13,9 @@ import {
   X,
   Check,
   AlertTriangle,
+  KeyRound,
 } from 'lucide-react';
+import { apiPost } from '../services/api';
 
 // ─── Role badge ───────────────────────────────────────────────────────────────
 
@@ -229,6 +231,31 @@ function DeleteConfirm({ target, onClose }: { target: ManagedUser; onClose: () =
   );
 }
 
+function ChangePasswordModal({ onClose }: { onClose: () => void }) {
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault(); setError('');
+    if (newPassword.length < 6) { setError('رمز جدید باید حداقل ۶ کاراکتر باشد.'); return; }
+    if (newPassword !== confirmPassword) { setError('تکرار رمز با رمز جدید یکسان نیست.'); return; }
+    setLoading(true);
+    const result = await apiPost('/auth/change-password', { current_password: currentPassword, new_password: newPassword });
+    if (result.error) { setError(result.error); setLoading(false); return; }
+    onClose(); alert('رمز عبور با موفقیت تغییر کرد.');
+  };
+  return <div className="fixed inset-0 z-50 flex items-center justify-center px-4" dir="rtl">
+    <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+    <div className="relative z-10 w-full max-w-md glass-card p-8">
+      <div className="flex items-center justify-between mb-6"><h2 className="text-lg font-bold text-white flex items-center gap-2"><KeyRound size={19} /> تغییر رمز عبور من</h2><button type="button" onClick={onClose} className="text-gray-400"><X size={20} /></button></div>
+      {error && <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">{error}</div>}
+      <form onSubmit={submit} className="space-y-4"><input className="input-dark" type="password" placeholder="رمز فعلی" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} required autoComplete="current-password" /><input className="input-dark" type="password" placeholder="رمز جدید (حداقل ۶ کاراکتر)" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required minLength={6} autoComplete="new-password" /><input className="input-dark" type="password" placeholder="تکرار رمز جدید" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required minLength={6} autoComplete="new-password" /><button type="submit" disabled={loading} className="btn-gold w-full">{loading ? 'در حال ذخیره…' : 'ذخیره رمز جدید'}</button></form>
+    </div>
+  </div>;
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function UsersPage() {
@@ -237,6 +264,7 @@ export default function UsersPage() {
   const [showCreate,    setShowCreate]    = useState(false);
   const [editTarget,    setEditTarget]    = useState<ManagedUser | null>(null);
   const [deleteTarget,  setDeleteTarget]  = useState<ManagedUser | null>(null);
+  const [showPasswordChange, setShowPasswordChange] = useState(false);
 
   return (
     <div className="space-y-6 animate-fade-in" dir="rtl">
@@ -252,13 +280,10 @@ export default function UsersPage() {
           </div>
           <p className="text-gray-500 text-sm">افزودن، ویرایش و تنظیم سطح دسترسی کاربران سیستم</p>
         </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="btn-gold flex items-center gap-2 self-start sm:self-auto"
-        >
-          <UserPlus size={18} />
-          ثبت نام منشی
-        </button>
+        <div className="flex flex-wrap gap-2 self-start sm:self-auto">
+          <button type="button" onClick={() => setShowPasswordChange(true)} className="btn-outline-gold flex items-center gap-2"><KeyRound size={17} /> تغییر رمز عبور</button>
+          <button type="button" onClick={() => setShowCreate(true)} className="btn-gold flex items-center gap-2"><UserPlus size={18} /> ثبت نام منشی</button>
+        </div>
       </div>
 
       {/* Table */}
@@ -337,6 +362,7 @@ export default function UsersPage() {
       {deleteTarget && (
         <DeleteConfirm target={deleteTarget} onClose={() => setDeleteTarget(null)} />
       )}
+      {showPasswordChange && <ChangePasswordModal onClose={() => setShowPasswordChange(false)} />}
     </div>
   );
 }

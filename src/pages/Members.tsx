@@ -177,6 +177,7 @@ export default function Members() {
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'expired' | 'all'>('active');
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Member | null>(null);
   const [form, setForm] = useState<MemberForm>(emptyForm);
@@ -221,10 +222,18 @@ export default function Members() {
     if (receipts.data) setProfileReceipts(receipts.data);
   };
 
-  const filteredMembers = members.filter((m) => {
-    const q = search.toLowerCase();
-    return m.full_name.toLowerCase().includes(q) || m.phone.includes(search) || (m.personnel_code || '').toLowerCase().includes(q) || (m.national_id || '').includes(search);
-  });
+  const filteredMembers = members
+    .filter((m) => {
+      const st = getMembershipStatus(m.end_date, archivedIds.has(m.id));
+      const matchesStatus = statusFilter === 'all'
+        || (statusFilter === 'active' && (st.kind === 'active' || st.kind === 'expiring_soon'))
+        || (statusFilter === 'inactive' && st.kind === 'archived')
+        || (statusFilter === 'expired' && st.kind === 'expired');
+      const q = search.toLowerCase().trim();
+      const matchesSearch = !q || m.full_name.toLowerCase().includes(q) || m.phone.includes(search) || (m.personnel_code || '').toLowerCase().includes(q) || (m.national_id || '').includes(search);
+      return matchesStatus && matchesSearch;
+    })
+    .sort((a, b) => a.full_name.localeCompare(b.full_name, 'fa'));
 
   const openAdd = () => { setEditing(null); setEnrollFingerprint(true); setForm(emptyForm()); setFormError(''); setShowModal(true); };
 
@@ -369,9 +378,17 @@ export default function Members() {
         <button type="button" onClick={openAdd} className="btn-primary"><UserPlus size={16} /> عضو جدید</button>
       </div>
 
-      <div className="relative">
-        <Search size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--text-muted)' }} />
-        <input className="input-field pr-10" placeholder="جستجو نام، تلفن، کد ملی یا پرسنلی..." value={search} onChange={(e) => setSearch(e.target.value)} />
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--text-muted)' }} />
+          <input className="input-field pr-10" placeholder="جستجو نام، تلفن، کد ملی یا پرسنلی..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <select className="input-field sm:w-52" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} aria-label="فیلتر وضعیت اعضا">
+          <option value="active">اعضای فعال</option>
+          <option value="inactive">اعضای غیرفعال</option>
+          <option value="expired">اعضای منقضی</option>
+          <option value="all">همه اعضا</option>
+        </select>
       </div>
 
       <div className="panel-card overflow-hidden">

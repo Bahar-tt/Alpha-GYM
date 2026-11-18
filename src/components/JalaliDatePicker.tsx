@@ -57,7 +57,7 @@ export default function JalaliDatePicker({
 }: JalaliDatePickerProps) {
   const today = todayJalali();
   const [open, setOpen] = useState(false);
-  const [dropUp, setDropUp] = useState(false);
+  const [popoverPosition, setPopoverPosition] = useState<{ top?: number; bottom?: number; right: number }>({ right: 8 });
   const [viewYear, setViewYear] = useState(value?.year ?? today.year);
   const [viewMonth, setViewMonth] = useState(value?.month ?? today.month);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -126,7 +126,13 @@ export default function JalaliDatePicker({
   const toggleCalendar = () => {
     if (!open) {
       const rect = rootRef.current?.getBoundingClientRect();
-      setDropUp(Boolean(rect && window.innerHeight - rect.bottom < 470));
+      if (rect) {
+        const shouldDropUp = window.innerHeight - rect.bottom < 470;
+        const right = Math.max(8, Math.min(window.innerWidth - rect.right, window.innerWidth - 328));
+        setPopoverPosition(shouldDropUp
+          ? { bottom: Math.max(8, window.innerHeight - rect.top + 8), right }
+          : { top: Math.min(window.innerHeight - 438, rect.bottom + 8), right });
+      }
     }
     setOpen((o) => !o);
   };
@@ -175,15 +181,16 @@ export default function JalaliDatePicker({
 
       {open && (
         <div
-          className="absolute z-[100] w-[320px] max-w-[calc(100vw-2rem)] rounded-2xl p-3 shadow-lg"
+          className="fixed z-[9999] w-[320px] max-w-[calc(100vw-2rem)] rounded-2xl p-3 shadow-lg"
           style={{
+            position: 'fixed',
             background: 'var(--bg-elevated)',
             border: '1px solid var(--border)',
             boxShadow: 'var(--shadow)',
-            right: 0,
-            top: dropUp ? 'auto' : 'calc(100% + 8px)',
-            bottom: dropUp ? 'calc(100% + 8px)' : 'auto',
-            maxHeight: 'min(430px, calc(100vh - 24px))',
+            right: popoverPosition.right,
+            top: popoverPosition.top,
+            bottom: popoverPosition.bottom,
+            maxHeight: 'calc(100vh - 16px)',
             overflowY: 'auto',
           }}
         >
