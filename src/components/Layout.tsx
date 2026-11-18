@@ -23,6 +23,7 @@ import {
   Bell,
   Sparkles,
   Fingerprint,
+  KeyRound,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -36,7 +37,8 @@ const NAV_ITEMS = [
   { to: '/accounting', label: 'حسابداری', icon: Wallet, adminOnly: true },
   { to: '/staff-attendance', label: 'تردد پرسنل', icon: CalendarCheck, adminOnly: false },
   { to: '/settings', label: 'تنظیمات', icon: Settings, adminOnly: true },
-  { to: '/users', label: 'کاربران', icon: UserCog, adminOnly: true },
+  { to: '/profile', label: 'تغییر رمز عبور', icon: KeyRound, adminOnly: false },
+  { to: '/users', label: 'مدیریت کاربران', icon: UserCog, adminOnly: true },
 ] as const;
 
 const PAGE_TITLES: Record<string, string> = {
@@ -51,6 +53,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/staff-attendance': 'تردد پرسنل',
   '/settings': 'تنظیمات پنل',
   '/users': 'مدیریت کاربران',
+  '/profile': 'تغییر رمز عبور',
 };
 
 const SIDEBAR_W = 280;

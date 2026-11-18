@@ -57,6 +57,7 @@ export default function JalaliDatePicker({
 }: JalaliDatePickerProps) {
   const today = todayJalali();
   const [open, setOpen] = useState(false);
+  const [dropUp, setDropUp] = useState(false);
   const [viewYear, setViewYear] = useState(value?.year ?? today.year);
   const [viewMonth, setViewMonth] = useState(value?.month ?? today.month);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -122,6 +123,13 @@ export default function JalaliDatePicker({
   const cells = buildMonthGrid(viewYear, viewMonth);
 
   const years = Array.from({ length: 80 }, (_, i) => today.year - 60 + i);
+  const toggleCalendar = () => {
+    if (!open) {
+      const rect = rootRef.current?.getBoundingClientRect();
+      setDropUp(Boolean(rect && window.innerHeight - rect.bottom < 470));
+    }
+    setOpen((o) => !o);
+  };
 
   return (
     <div ref={rootRef} className="relative" style={{ zIndex: open ? 200 : 1 }}>
@@ -132,7 +140,7 @@ export default function JalaliDatePicker({
 
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggleCalendar}
         className="input-field flex items-center gap-2 text-right w-full cursor-pointer"
         style={{ minHeight: 44 }}
       >
@@ -167,12 +175,14 @@ export default function JalaliDatePicker({
 
       {open && (
         <div
-          className="absolute z-[100] mt-2 w-[320px] max-w-[calc(100vw-2rem)] rounded-2xl p-3 shadow-lg"
+          className="absolute z-[100] w-[320px] max-w-[calc(100vw-2rem)] rounded-2xl p-3 shadow-lg"
           style={{
             background: 'var(--bg-elevated)',
             border: '1px solid var(--border)',
             boxShadow: 'var(--shadow)',
             right: 0,
+            top: dropUp ? 'auto' : 'calc(100% + 8px)',
+            bottom: dropUp ? 'calc(100% + 8px)' : 'auto',
             maxHeight: 'min(430px, calc(100vh - 24px))',
             overflowY: 'auto',
           }}

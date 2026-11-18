@@ -16,6 +16,7 @@ import ReceiptPage from './pages/ReceiptPage';
 import UsersPage from './pages/Users';
 import PersonnelAttendance from './pages/PersonnelAttendance';
 import FingerprintScanner from './pages/FingerprintScanner';
+import ProfileSettings from './pages/ProfileSettings';
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -54,6 +55,7 @@ function App() {
               <Route path="accounting" element={<ProtectedRoute requireAdmin><Accounting /></ProtectedRoute>} />
               <Route path="settings" element={<ProtectedRoute requireAdmin><Settings /></ProtectedRoute>} />
               <Route path="users" element={<ProtectedRoute requireAdmin><UsersPage /></ProtectedRoute>} />
+              <Route path="profile" element={<ProfileSettings />} />
               <Route path="staff-attendance" element={<PersonnelAttendance />} />
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
