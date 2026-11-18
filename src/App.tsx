@@ -52,7 +52,7 @@ function App() {
               <Route path="broadcast" element={<Navigate to="/sms?tab=broadcast" replace />} />
               <Route path="coaches" element={<ProtectedRoute requireAdmin><Coaches /></ProtectedRoute>} />
               <Route path="coach" element={<ProtectedRoute requireAdmin><CoachPortal /></ProtectedRoute>} />
-              <Route path="accounting" element={<ProtectedRoute requireAdmin><Accounting /></ProtectedRoute>} />
+              <Route path="accounting" element={<Accounting />} />
               <Route path="settings" element={<ProtectedRoute requireAdmin><Settings /></ProtectedRoute>} />
               <Route path="users" element={<ProtectedRoute requireAdmin><UsersPage /></ProtectedRoute>} />
               <Route path="profile" element={<ProfileSettings />} />

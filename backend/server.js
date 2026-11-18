@@ -1045,6 +1045,13 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+function requireExpenseAccess(req, res, next) {
+  if (!['admin', 'staff'].includes(String(req.staff?.role || ''))) {
+    return res.status(403).json({ error: 'دسترسی ثبت هزینه برای این کاربر فعال نیست' });
+  }
+  next();
+}
+
 // ✅ ثبت رخداد در audit_logs
 function audit(req, action, { entityType, entityId, memberId, detail } = {}) {
   const actor = req.staff || null;
@@ -2694,6 +2701,7 @@ function mapExpenseRow(e) {
 }
 
 const accountingGuards = [requireAuth, requireAdmin, requireFeature('accounting')];
+const expenseGuards = [requireAuth, requireExpenseAccess, requireFeature('accounting')];
 
 // 📊 خلاصه مالی
 app.get('/accounting/summary', accountingGuards, (req, res) => {
@@ -3204,7 +3212,7 @@ app.get('/accounting/coach-report', accountingGuards, (req, res) => {
 // استفاده کند. نسخهٔ قدیمی که فقط یک عدد در ماه ثبت می‌کرد حذف شد.
 
 // 💸 هزینه‌ها
-app.get('/accounting/expenses', accountingGuards, (req, res) => {
+app.get('/accounting/expenses', expenseGuards, (req, res) => {
   try {
     const { f, t } = periodBounds(req.query.from, req.query.to);
     const where = ['date BETWEEN ? AND ?'];
@@ -3224,7 +3232,7 @@ app.get('/accounting/expenses', accountingGuards, (req, res) => {
   }
 });
 
-app.post('/accounting/expenses', accountingGuards, (req, res) => {
+app.post('/accounting/expenses', expenseGuards, (req, res) => {
   try {
     const { title, amount, category, date, note, spent_at, notes } = req.body || {};
     if (!title || !String(title).trim()) {

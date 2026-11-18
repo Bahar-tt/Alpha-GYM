@@ -33,7 +33,7 @@ const NAV_ITEMS = [
   { to: '/sms', label: 'مرکز پیامک', icon: MessageSquare, adminOnly: false },
   { to: '/coaches', label: 'مربیان', icon: UserRound, adminOnly: true },
   { to: '/coach', label: 'پورتال مربی', icon: Dumbbell, adminOnly: true },
-  { to: '/accounting', label: 'حسابداری', icon: Wallet, adminOnly: true },
+  { to: '/accounting', label: 'حسابداری', icon: Wallet, adminOnly: false },
   { to: '/staff-attendance', label: 'تردد پرسنل', icon: CalendarCheck, adminOnly: false },
   { to: '/settings', label: 'تنظیمات', icon: Settings, adminOnly: true },
   { to: '/users', label: 'مدیریت کاربران', icon: UserCog, adminOnly: true },

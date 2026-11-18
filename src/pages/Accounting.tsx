@@ -7,6 +7,8 @@ import {
   deleteExpense,
   getCoachPayroll,
   getMemberFinancialAlerts,
+  getExpenses,
+  type Expense,
   type AccountingSummary,
 } from '../services/accountingService';
 import { getCoaches, type Coach } from '../services/coachService';
@@ -27,6 +29,7 @@ import {
   BarChart3,
   Download,
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 type Tab = 'overview' | 'specialty' | 'coaches' | 'payroll' | 'payments' | 'expenses' | 'ledger';
 
@@ -89,6 +92,7 @@ function downloadReport(data: AccountingSummary, from: JalaliDate, to: JalaliDat
 }
 
 export default function Accounting() {
+  const { isAdmin } = useAuth();
   const [data, setData] = useState<AccountingSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('overview');
@@ -105,6 +109,7 @@ export default function Accounting() {
   const [outputFormat, setOutputFormat] = useState('');
 
   const load = useCallback(async () => {
+    if (!isAdmin) { setLoading(false); return; }
     setLoading(true);
     const [s, c, p, a] = await Promise.all([
       getAccountingSummary(jalaliToGregorianIso(fromDate), jalaliToGregorianIso(toDate)),
@@ -117,13 +122,15 @@ export default function Accounting() {
     setPayroll(p.data || []);
     setAlerts(a.data?.rows || []);
     setLoading(false);
-  }, [fromDate, toDate]);
+  }, [fromDate, toDate, isAdmin]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   const t = data?.totals;
+
+  if (!isAdmin) return <StaffExpenseAccounting />;
 
   return (
     <div className="space-y-6">
@@ -691,6 +698,32 @@ function PaymentsTable({
       </table>
     </div>
   );
+}
+
+function StaffExpenseAccounting() {
+  const [rows, setRows] = useState<Expense[]>([]);
+  const [showExpense, setShowExpense] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const load = async () => {
+    setLoading(true);
+    const result = await getExpenses();
+    if (result.error) setError(result.error.message);
+    else setRows(result.data?.rows || []);
+    setLoading(false);
+  };
+  useEffect(() => { void load(); }, []);
+  const save = async (payload: { category: string; title: string; amount: number; spent_at?: string }) => {
+    const result = await addExpense(payload);
+    if (result.error) { setError(result.error.message); return; }
+    setShowExpense(false); await load();
+  };
+  return <div className="space-y-6" dir="rtl">
+    <div className="page-hero flex flex-wrap items-center justify-between gap-4"><div><h1 className="page-title">ثبت هزینه‌های جاری</h1><p className="page-subtitle">این بخش فقط برای ثبت هزینه‌های جاری منشی فعال است.</p></div><button type="button" className="btn-primary" onClick={() => setShowExpense(true)}><Plus size={16} /> ثبت هزینه جاری</button></div>
+    {error && <div className="rounded-xl p-3 text-sm" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>{error}</div>}
+    <div className="panel-card overflow-hidden"><table className="w-full min-w-[560px]"><thead><tr style={{ background: 'var(--bg-muted)' }}>{['تاریخ', 'دسته‌بندی', 'عنوان', 'مبلغ'].map((h) => <th key={h} className="text-right text-xs px-4 py-3" style={{ color: 'var(--text-secondary)' }}>{h}</th>)}</tr></thead><tbody>{loading ? <tr><td colSpan={4} className="p-8 text-center text-sm">در حال دریافت…</td></tr> : rows.length === 0 ? <tr><td colSpan={4} className="p-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>هزینه‌ای ثبت نشده است.</td></tr> : rows.map((e) => <tr key={e.id} className="table-row"><td className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>{formatJalali(String(e.spent_at).slice(0, 10))}</td><td className="px-4 py-3"><span className="badge badge-warning">{e.category}</span></td><td className="px-4 py-3 text-sm">{e.title}</td><td className="px-4 py-3 text-sm font-bold" style={{ color: 'var(--danger)' }}>{fmt(e.amount)}</td></tr>)}</tbody></table></div>
+    {showExpense && <ExpenseModal onClose={() => setShowExpense(false)} onSave={save} />}
+  </div>;
 }
 
 function ExpensesTable({

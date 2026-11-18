@@ -143,3 +143,11 @@ export async function deleteExpense(id: number) {
   const result = await apiDelete(`/accounting/expenses/${id}`);
   return { error: result.error ? { message: result.error } : null };
 }
+
+export async function getExpenses(from?: string, to?: string) {
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  const result = await apiGet<{ rows: Expense[]; total: number; count: number }>(`/accounting/expenses?${params.toString()}`);
+  return result.error ? { data: null, error: { message: result.error } } : { data: result.data, error: null };
+}
