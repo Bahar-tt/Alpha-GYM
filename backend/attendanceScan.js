@@ -604,6 +604,43 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
     }
   });
 
+  app.get('/attendance/report/daily', requireAuth, (req, res) => {
+    try {
+      const requested = String(req.query.date || todayIso()).trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(requested)) {
+        return res.status(400).json({ error: 'تاریخ گزارش نامعتبر است' });
+      }
+      const rows = db.prepare(
+        `SELECT a.id, a.member_id, m.name AS member_name, m.phone, a.member_code,
+                COALESCE(a.sport, '') AS sport,
+                COALESCE(a.source, 'scanner') AS scan_type,
+                COALESCE(a.direction, 'check_in') AS direction,
+                a.credential_kind, a.device_id,
+                COALESCE(d.name, a.device_id) AS device_name,
+                m.expiry_date, m.total_sessions, m.used_sessions,
+                a.attended_at AS scan_time
+         FROM attendances a
+         LEFT JOIN members m ON m.id = a.member_id
+         LEFT JOIN devices d ON d.id = a.device_id
+         WHERE date(a.attended_at, 'localtime') = ?
+         ORDER BY datetime(a.attended_at) ASC, a.id ASC`
+      ).all(requested);
+      const summary = {
+        total_scans: rows.length,
+        check_ins: rows.filter((r) => r.direction !== 'check_out').length,
+        check_outs: rows.filter((r) => r.direction === 'check_out').length,
+        unique_members: new Set(rows.map((r) => r.member_id).filter(Boolean)).size,
+      };
+      res.json({ date: requested, summary, rows: rows.map((row) => ({
+        ...row,
+        member: row.member_id ? memberPayload(db.prepare('SELECT * FROM members WHERE id = ?').get(row.member_id)) : null,
+      })) });
+    } catch (e) {
+      console.error('[attendance/report/daily]', e);
+      res.status(500).json({ error: 'Failed to create daily attendance report' });
+    }
+  });
+
   app.get('/attendance/recent', requireAuth, (req, res) => {
     try {
       const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));

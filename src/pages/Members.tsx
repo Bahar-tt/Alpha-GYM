@@ -60,6 +60,7 @@ import {
   Printer,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { apiPost } from '../services/api';
 
 type Member = MemberRecord;
 
@@ -185,6 +186,7 @@ export default function Members() {
   const [profileReceipts, setProfileReceipts] = useState<Receipt[]>([]);
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [cardTarget, setCardTarget] = useState<Member | null>(null);
+  const [enrollFingerprint, setEnrollFingerprint] = useState(true);
 
   const archivedIds = useMemo(() => new Set(loadJson<string[]>(ARCHIVED_KEY, [])), [members, showModal, profileMember]);
   const renewalLogs = useMemo(() => loadJson<RenewalLog[]>(RENEWALS_KEY, []), [members, profileMember]);
@@ -224,7 +226,7 @@ export default function Members() {
     return m.full_name.toLowerCase().includes(q) || m.phone.includes(search) || (m.personnel_code || '').toLowerCase().includes(q) || (m.national_id || '').includes(search);
   });
 
-  const openAdd = () => { setEditing(null); setForm(emptyForm()); setFormError(''); setShowModal(true); };
+  const openAdd = () => { setEditing(null); setEnrollFingerprint(true); setForm(emptyForm()); setFormError(''); setShowModal(true); };
 
   const openEdit = (member: Member) => {
     const { first, last } = splitName(member.full_name);
@@ -237,6 +239,7 @@ export default function Members() {
       coach_name: s.coach_name || '',
     }));
     setEditing(member);
+    setEnrollFingerprint(false);
     setForm({
       first_name: first, last_name: last, father_name: member.father_name || '', phone: member.phone,
       national_id: member.national_id || '', membership_type: member.membership_type || 'monthly',
@@ -323,9 +326,20 @@ export default function Members() {
     setSubmitting(true);
     try {
       const payload = buildPayload();
+      let enrollmentMessage = '';
       if (editing) { const { error } = await updateMember(editing.id, payload); if (error) throw error; }
-      else { const { error } = await addMember(payload); if (error) throw error; }
+      else {
+        const created = await addMember(payload);
+        if (created.error) throw created.error;
+        const memberId = created.data?.[0]?.id;
+        if (enrollFingerprint && memberId) {
+          const enrollment = await apiPost<{ instructions?: string; member_name?: string }>('/credentials/enroll', { member_id: Number(memberId), kind: 'finger', ttl_seconds: 180 });
+          if (enrollment.error) enrollmentMessage = `عضو ثبت شد، اما درخواست ثبت اثر انگشت ایجاد نشد: ${enrollment.error}`;
+          else enrollmentMessage = `عضو ثبت شد. ${enrollment.data?.instructions || 'اکنون انگشت عضو را روی دستگاه قرار دهید.'}`;
+        }
+      }
       setShowModal(false); setForm(emptyForm()); setEditing(null); await fetchMembers();
+      if (enrollmentMessage) window.alert(enrollmentMessage);
     } catch (e2: unknown) { setFormError(getApiErrorMessage(e2)); }
     finally { setSubmitting(false); }
   };
@@ -554,6 +568,15 @@ export default function Members() {
               <div className="flex items-center gap-2 pt-6">
                 <input type="checkbox" id="ins" checked={form.has_insurance} onChange={(e) => setForm({ ...form, has_insurance: e.target.checked })} />
                 <label htmlFor="ins" className="text-sm" style={{ color: 'var(--text)' }}>بیمه ورزشی دارد</label>
+              </div>
+
+              <SectionTitle>اتصال به اسکنر اثر انگشت</SectionTitle>
+              <div className="sm:col-span-2 lg:col-span-4 rounded-xl p-3 flex items-start gap-3" style={{ background: 'var(--accent-soft)', border: '1px solid var(--border)' }}>
+                <input id="enroll-fingerprint" type="checkbox" checked={enrollFingerprint} disabled={!!editing} onChange={(e) => setEnrollFingerprint(e.target.checked)} className="mt-1" />
+                <label htmlFor="enroll-fingerprint" className="text-sm" style={{ color: 'var(--text)' }}>
+                  {editing ? 'ثبت اثر انگشت فقط هنگام ایجاد عضو جدید انجام می‌شود.' : 'پس از ثبت عضو، درخواست ثبت اثر انگشت برای Agent ارسال شود.'}
+                  {!editing && <span className="block text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>پس از ذخیره، منشی باید حداکثر تا ۳ دقیقه انگشت عضو را طبق پیام Agent روی دستگاه قرار دهد.</span>}
+                </label>
               </div>
 
               <SectionTitle>اطلاعات تکمیلی</SectionTitle>
