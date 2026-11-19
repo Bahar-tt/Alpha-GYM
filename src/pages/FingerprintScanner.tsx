@@ -9,7 +9,16 @@ type ScanMember = { name?: string | null; phone?: string | null; member_code?: s
 type ScanRow = { id: number; member_name?: string | null; member_code?: string | null; sport?: string | null; credential_kind?: string | null; device_id?: string | null; device_name?: string | null; scan_type?: string | null; direction?: string | null; scan_time?: string | null; total_sessions?: number | null; used_sessions?: number | null; member?: ScanMember | null };
 type ReportSummary = { total_scans: number; check_ins: number; check_outs: number; unique_members: number };
 
-function formatDate(value?: string | null) { if (!value) return '—'; return new Intl.DateTimeFormat('fa-IR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Tehran' }).format(new Date(value)); }
+function parseScanDate(value?: string | null) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  // SQLite datetime('now') is UTC but has no suffix; make that explicit before formatting.
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(raw)) {
+    return new Date(`${raw.replace(' ', 'T')}Z`);
+  }
+  return new Date(raw);
+}
+function formatDate(value?: string | null) { const date = parseScanDate(value); if (!date || Number.isNaN(date.getTime())) return '—'; return new Intl.DateTimeFormat('fa-IR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Tehran' }).format(date); }
 function kindLabel(kind?: string | null) { if (kind === 'finger') return 'اثر انگشت'; if (kind === 'card') return 'کارت'; return kind || 'اسکنر'; }
 function directionLabel(direction?: string | null) { return direction === 'check_out' ? 'خروج' : 'ورود'; }
 
@@ -35,7 +44,7 @@ export default function FingerprintScanner() {
       setError('');
       setStats(statsResult.data || null);
       const rows = [...(reportResult.data?.rows || [])].sort((a, b) => {
-        const timeDiff = new Date(String(b.scan_time || '')).getTime() - new Date(String(a.scan_time || '')).getTime();
+        const timeDiff = (parseScanDate(b.scan_time)?.getTime() || 0) - (parseScanDate(a.scan_time)?.getTime() || 0);
         return timeDiff || Number(b.id) - Number(a.id);
       });
       setReportRows(rows);

@@ -151,6 +151,13 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
    *  HELPERS
    * ------------------------------------------------------------------ */
   const pad = (n) => String(n).padStart(2, '0');
+  function parseStoredTimestamp(value) {
+    const raw = String(value || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(raw)) {
+      return new Date(`${raw.replace(' ', 'T')}Z`);
+    }
+    return new Date(raw);
+  }
   function todayIso() {
     const d = new Date();
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -665,7 +672,7 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
         { header: 'تاریخ انقضا', key: 'expiry_date', width: 16 }, { header: 'کل جلسات', key: 'total_sessions', width: 12 },
         { header: 'جلسات مصرف‌شده', key: 'used_sessions', width: 16 }, { header: 'جلسات باقی‌مانده', key: 'remaining', width: 16 },
       ];
-      rows.forEach((row) => sheet.addRow({ ...row, direction: row.direction === 'check_out' ? 'خروج' : 'ورود', scan_time: new Intl.DateTimeFormat('fa-IR', { dateStyle: 'short', timeStyle: 'medium', timeZone: 'Asia/Tehran' }).format(new Date(row.scan_time)), remaining: Math.max(0, Number(row.total_sessions || 0) - Number(row.used_sessions || 0)) }));
+      rows.forEach((row) => sheet.addRow({ ...row, direction: row.direction === 'check_out' ? 'خروج' : 'ورود', scan_time: new Intl.DateTimeFormat('fa-IR', { dateStyle: 'short', timeStyle: 'medium', timeZone: 'Asia/Tehran' }).format(parseStoredTimestamp(row.scan_time)), remaining: Math.max(0, Number(row.total_sessions || 0) - Number(row.used_sessions || 0)) }));
       sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
       sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF111827' } };
       sheet.autoFilter = { from: 'A1', to: 'L1' };
@@ -698,7 +705,7 @@ module.exports = function registerAttendanceScan(app, db, opts = {}) {
       doc.fontSize(10).text(`Date: ${requested} | Tehran time | Records: ${rows.length}`);
       doc.moveDown();
       rows.forEach((row, i) => {
-        const time = new Intl.DateTimeFormat('en-GB', { dateStyle: 'short', timeStyle: 'medium', timeZone: 'Asia/Tehran' }).format(new Date(row.scan_time));
+        const time = new Intl.DateTimeFormat('en-GB', { dateStyle: 'short', timeStyle: 'medium', timeZone: 'Asia/Tehran' }).format(parseStoredTimestamp(row.scan_time));
         doc.fontSize(9).text(`${i + 1}. ${row.member_name || 'Unknown'} | ${row.member_code || '-'} | ${row.direction === 'check_out' ? 'EXIT' : 'ENTRY'} | ${row.sport || '-'} | ${time}`);
         if (doc.y > 760) doc.addPage().font(font);
       });
