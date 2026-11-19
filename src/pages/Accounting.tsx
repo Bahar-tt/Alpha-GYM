@@ -192,7 +192,7 @@ export default function Accounting() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Kpi
           icon={TrendingUp}
-          label="درآمد ماهانه (شهریه)"
+          label="دریافت واقعی دوره"
           value={t ? fmt(t.monthly_revenue) : '—'}
           tone="accent"
         />
@@ -262,7 +262,7 @@ export default function Accounting() {
               <PieChart size={16} style={{ color: 'var(--accent)' }} />
               ترکیب مالی ماهانه
             </h3>
-            <BarRow label="درآمد شهریه" value={data.totals.monthly_revenue} max={Math.max(data.totals.monthly_revenue, 1)} color="var(--accent)" />
+            <BarRow label="دریافت واقعی دوره" value={data.totals.monthly_revenue} max={Math.max(data.totals.monthly_revenue, 1)} color="var(--accent)" />
             <BarRow label="سهم مربی" value={data.totals.coach_share} max={Math.max(data.totals.monthly_revenue, 1)} color="var(--gold)" />
             <BarRow label="سود بالقوه" value={data.totals.potential_net} max={Math.max(data.totals.monthly_revenue, 1)} color="var(--success)" />
             <BarRow label="هزینه‌های ثبت‌شده" value={data.totals.expenses} max={Math.max(data.totals.monthly_revenue, data.totals.expenses, 1)} color="var(--danger)" />

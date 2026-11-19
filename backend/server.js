@@ -1345,7 +1345,11 @@ app.get('/audit-logs', requireAuth, requireAdmin, (req, res) => {
 ========================= */
 
 function todayIso() {
-  return new Date().toISOString().split('T')[0];
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 // ✅ فاصله بین ارسال‌های broadcast (جلوگیری از rate-limit کاوه‌نگار)
@@ -2623,7 +2627,7 @@ app.get('/members/export', requireAuth, async (_req, res) => {
 
 // ✅ بازه زمانی پیش‌فرض: ماه جاری
 function periodBounds(from, to) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIso();
   const firstDay = today.slice(0, 8) + '01';
   return {
     f: from ? String(from).slice(0, 10) : firstDay,
@@ -2670,6 +2674,9 @@ function sendCsv(res, filename, headers, rows) {
 function mapPaymentRow(p) {
   const type = p.type || 'manual';
   const direction = p.direction || (type === 'coach_payout' ? 'out' : 'in');
+  const shareAmount = Number(p.coach_share_amount ?? p.coach_share) || 0;
+  const sharePercent = Number(p.coach_share_percent) || (p.amount && shareAmount
+    ? Math.round((shareAmount / Number(p.amount)) * 1000) / 10 : 0);
   return {
     id: p.id,
     type,
@@ -2679,8 +2686,8 @@ function mapPaymentRow(p) {
     member_id: p.member_id ?? null,
     coach_id: p.coach_id ?? null,
     coach_name: p.coach_name_snapshot || null,
-    coach_share_percent: Number(p.coach_share_percent) || 0,
-    coach_share_amount: Number(p.coach_share_amount ?? p.coach_share) || 0,
+    coach_share_percent: sharePercent,
+    coach_share_amount: shareAmount,
     title: p.title || p.member_name || p.note || null,
     notes: p.note || null,
     paid_at: p.paid_at || String(p.created_at || '').slice(0, 10),
@@ -2709,88 +2716,52 @@ app.get('/accounting/summary', accountingGuards, (req, res) => {
     const { f, t } = periodBounds(req.query.from, req.query.to);
 
     const activeMembers = Number(db.prepare(
-      "SELECT COUNT(*) AS c FROM members WHERE date(expiry_date) >= date('now')"
-    ).get().c) || 0;
+      "SELECT COUNT(*) AS c FROM members WHERE date(expiry_date) >= date(?)"
+    ).get(todayIso()).c) || 0;
 
-    // درآمد تئوریک ماهانه از شهریه‌های ثبت‌شده روی اشتراک‌های فعال
-    const feeRows = db.prepare(`
-      SELECT ms.tuition_amount AS fee, ms.unit_price AS unit, ms.coach_id,
-             CASE WHEN COALESCE(cs.commission_percent, 0) > 0
-                  THEN cs.commission_percent ELSE COALESCE(c.default_share, 0) END AS pct
-      FROM member_sports ms
-      JOIN members m ON m.id = ms.member_id
-      LEFT JOIN coaches c ON c.id = ms.coach_id
-      LEFT JOIN coach_sports cs ON cs.coach_id = ms.coach_id AND cs.sport = ms.sport
-      WHERE date(m.expiry_date) >= date('now')
-    `).all();
-
-    let monthlyRevenue = 0;
-    let coachShare = 0;
-    for (const r of feeRows) {
-      const fee = Number(r.fee) || Number(r.unit) || 0;
-      monthlyRevenue += fee;
-      coachShare += (fee * (Number(r.pct) || 0)) / 100;
+    // گزارش تاریخی باید فقط از پرداخت‌های همان دوره و snapshot ثبت‌شده در تراکنش استفاده کند.
+    const historicalPayments = db.prepare(
+      'SELECT * FROM payments WHERE substr(COALESCE(paid_at, created_at), 1, 10) BETWEEN ? AND ? ORDER BY id DESC'
+    ).all(f, t);
+    const incomePayments = historicalPayments.filter((p) => p.direction !== 'out');
+    const snapshotShare = (p) => Number(p.coach_share_amount ?? p.coach_share) || 0;
+    const specialtyGroups = new Map();
+    for (const p of incomePayments) {
+      const rawSport = String(p.sport || '').trim();
+      const specialty = ['خصوصی فاطمه', 'خصوصی فاطمه طباطبایی', 'خصوصی فاطمه طباطبایی زاده'].includes(rawSport)
+        ? 'خصوصی فاطمه طباطبایی' : (rawSport || 'نامشخص');
+      const row = specialtyGroups.get(specialty) || { specialty, revenue: 0, members: new Set(), coach_share: 0 };
+      row.revenue += Number(p.amount) || 0;
+      if (p.member_id != null) row.members.add(String(p.member_id));
+      row.coach_share += snapshotShare(p);
+      specialtyGroups.set(specialty, row);
     }
-
-    const bySpecialty = db.prepare(`
-      SELECT CASE
-               WHEN TRIM(ms.sport) IN ('خصوصی فاطمه', 'خصوصی فاطمه طباطبایی', 'خصوصی فاطمه طباطبایی زاده')
-                 THEN 'خصوصی فاطمه طباطبایی'
-               ELSE COALESCE(NULLIF(TRIM(ms.sport), ''), 'نامشخص')
-             END AS specialty,
-             COUNT(DISTINCT ms.member_id) AS members,
-             COALESCE(SUM(COALESCE(NULLIF(ms.tuition_amount, 0), ms.unit_price, 0)), 0) AS revenue,
-             ROUND(COALESCE(SUM(
-               COALESCE(NULLIF(ms.tuition_amount, 0), ms.unit_price, 0) *
-               CASE WHEN COALESCE(cs.commission_percent, 0) > 0
-                    THEN cs.commission_percent ELSE COALESCE(c.default_share, 0) END / 100.0
-             ), 0)) AS coach_share
-      FROM member_sports ms
-      JOIN members m ON m.id = ms.member_id
-      LEFT JOIN coaches c ON c.id = ms.coach_id
-      LEFT JOIN coach_sports cs ON cs.coach_id = ms.coach_id AND cs.sport = ms.sport
-      WHERE date(m.expiry_date) >= date('now')
-      GROUP BY CASE
-                 WHEN TRIM(ms.sport) IN ('خصوصی فاطمه', 'خصوصی فاطمه طباطبایی', 'خصوصی فاطمه طباطبایی زاده')
-                   THEN 'خصوصی فاطمه طباطبایی'
-                 ELSE COALESCE(NULLIF(TRIM(ms.sport), ''), 'نامشخص')
-               END
-      HAVING COALESCE(SUM(COALESCE(NULLIF(ms.tuition_amount, 0), ms.unit_price, 0)), 0) > 0
-      ORDER BY revenue DESC
-    `).all();
-
-    const byCoach = db.prepare(`
-      SELECT ms.coach_id AS coach_id,
-             COALESCE(c.name, 'بدون مربی') AS coach_name,
-             COALESCE(GROUP_CONCAT(DISTINCT NULLIF(TRIM(ms.sport), '')), '—') AS specialty,
-             COUNT(DISTINCT ms.member_id) AS members,
-             COALESCE(SUM(COALESCE(NULLIF(ms.tuition_amount, 0), ms.unit_price, 0)), 0) AS revenue,
-             COALESCE(c.default_share, 0) AS commission_percent,
-             ROUND(COALESCE(SUM(
-               COALESCE(NULLIF(ms.tuition_amount, 0), ms.unit_price, 0) *
-               CASE WHEN COALESCE(cs.commission_percent, 0) > 0
-                    THEN cs.commission_percent ELSE COALESCE(c.default_share, 0) END / 100.0
-             ), 0)) AS coach_share
-      FROM member_sports ms
-      JOIN members m ON m.id = ms.member_id
-      JOIN coaches c ON c.id = ms.coach_id
-      LEFT JOIN coach_sports cs ON cs.coach_id = ms.coach_id AND cs.sport = ms.sport
-      WHERE date(m.expiry_date) >= date('now') AND ms.coach_id IS NOT NULL
-      GROUP BY ms.coach_id
-      HAVING COALESCE(SUM(COALESCE(NULLIF(ms.tuition_amount, 0), ms.unit_price, 0)), 0) > 0
-      ORDER BY revenue DESC
-    `).all();
-
-    const payments = db.prepare(
-      'SELECT * FROM payments WHERE substr(COALESCE(paid_at, created_at), 1, 10) BETWEEN ? AND ? ORDER BY id DESC LIMIT 300'
-    ).all(f, t).map(mapPaymentRow);
+    const bySpecialty = [...specialtyGroups.values()]
+      .map((r) => ({ ...r, members: r.members.size }))
+      .sort((a, b) => b.revenue - a.revenue);
+    const coachGroups = new Map();
+    for (const p of incomePayments.filter((row) => row.coach_id != null)) {
+      const key = String(p.coach_id);
+      const row = coachGroups.get(key) || { coach_id: Number(p.coach_id), coach_name: p.coach_name_snapshot || 'بدون مربی', sports: new Set(), revenue: 0, members: new Set(), coach_share: 0 };
+      if (p.sport) row.sports.add(String(p.sport).trim());
+      row.revenue += Number(p.amount) || 0;
+      if (p.member_id != null) row.members.add(String(p.member_id));
+      row.coach_share += snapshotShare(p);
+      coachGroups.set(key, row);
+    }
+    const byCoach = [...coachGroups.values()]
+      .map((r) => ({ ...r, specialty: [...r.sports].join('، ') || '—', members: r.members.size, commission_percent: r.revenue ? Math.round((r.coach_share / r.revenue) * 1000) / 10 : 0 }))
+      .sort((a, b) => b.revenue - a.revenue);
+    const payments = historicalPayments.map(mapPaymentRow);
     const expenses = db.prepare(
-      'SELECT * FROM expenses WHERE COALESCE(date, spent_at, substr(created_at, 1, 10)) BETWEEN ? AND ? ORDER BY id DESC LIMIT 300'
+      'SELECT * FROM expenses WHERE COALESCE(date, spent_at, substr(created_at, 1, 10)) BETWEEN ? AND ? ORDER BY id DESC'
     ).all(f, t).map(mapExpenseRow);
 
     const paymentsIn = payments.filter((p) => p.direction === 'in').reduce((s, p) => s + p.amount, 0);
     const paymentsOut = payments.filter((p) => p.direction === 'out').reduce((s, p) => s + p.amount, 0);
     const expenseTotal = expenses.reduce((s, e) => s + e.amount, 0);
+    const monthlyRevenue = paymentsIn;
+    const coachShare = incomePayments.reduce((sum, p) => sum + snapshotShare(p), 0);
 
     // گزارش تحلیلی بر اساس جریان نقدی واقعیِ همان بازه؛ مستقل از سقف ۳۰۰ ردیف جدول.
     const monthlyTrend = db.prepare(`
@@ -2906,7 +2877,7 @@ app.get('/accounting/summary', accountingGuards, (req, res) => {
 app.get('/accounting/payments', accountingGuards, (req, res) => {
   try {
     const { f, t } = periodBounds(req.query.from, req.query.to);
-    const where = ['substr(created_at,1,10) BETWEEN ? AND ?'];
+    const where = ['substr(COALESCE(paid_at, created_at),1,10) BETWEEN ? AND ?'];
     const params = [f, t];
     for (const [col, val] of [['type', req.query.type], ['method', req.query.method], ['sport', req.query.sport]]) {
       if (val) {
@@ -2950,7 +2921,7 @@ app.post('/accounting/payments', accountingGuards, (req, res) => {
         sport: sport ? String(sport).trim() : null,
         amount: amt,
         type: typeStr,
-        method: ['cash', 'card', 'transfer', 'pos', 'other'].includes(String(method)) ? String(method) : 'cash',
+        method: ['cash', 'card', 'transfer', 'pos', 'gateway', 'other'].includes(String(method)) ? String(method) : 'cash',
         note: note ? String(note).trim() : null,
         received_by: req.staff.full_name,
         coach_id: coach_id != null && coach_id !== '' ? Number(coach_id) : null,
@@ -3419,8 +3390,8 @@ app.get('/accounting/export/monthly-report.xlsx', accountingGuards, async (req, 
 app.get('/accounting/export/monthly-report.pdf', accountingGuards, (req, res) => {
   try {
     const { f, t } = periodBounds(req.query.from, req.query.to);
-    const payments = db.prepare('SELECT * FROM payments WHERE substr(COALESCE(paid_at, created_at),1,10) BETWEEN ? AND ? ORDER BY id DESC LIMIT 500').all(f, t);
-    const expenses = db.prepare('SELECT * FROM expenses WHERE substr(COALESCE(date, spent_at, created_at),1,10) BETWEEN ? AND ? ORDER BY id DESC LIMIT 500').all(f, t);
+    const payments = db.prepare('SELECT * FROM payments WHERE substr(COALESCE(paid_at, created_at),1,10) BETWEEN ? AND ? ORDER BY id DESC').all(f, t);
+    const expenses = db.prepare('SELECT * FROM expenses WHERE substr(COALESCE(date, spent_at, created_at),1,10) BETWEEN ? AND ? ORDER BY id DESC').all(f, t);
     const income = payments.filter((p) => p.direction !== 'out').reduce((s, p) => s + Number(p.amount || 0), 0);
     const payout = payments.filter((p) => p.direction === 'out').reduce((s, p) => s + Number(p.amount || 0), 0);
     const expenseTotal = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
@@ -3449,7 +3420,7 @@ app.get('/accounting/export/monthly-report.pdf', accountingGuards, (req, res) =>
 app.get('/accounting/export/payments.csv', accountingGuards, (req, res) => {
   try {
     const { f, t } = periodBounds(req.query.from, req.query.to);
-    const where = ['substr(created_at,1,10) BETWEEN ? AND ?'];
+    const where = ['substr(COALESCE(paid_at, created_at),1,10) BETWEEN ? AND ?'];
     const params = [f, t];
     for (const [col, val] of [['type', req.query.type], ['method', req.query.method], ['sport', req.query.sport]]) {
       if (val) {
@@ -3466,12 +3437,12 @@ app.get('/accounting/export/payments.csv', accountingGuards, (req, res) => {
       p.member_name || '',
       p.sport || '',
       fa.format(p.amount || 0),
-      fa.format(p.coach_share || 0),
+      fa.format(p.coach_share_amount ?? p.coach_share ?? 0),
       typeLabel[p.type] || p.type || '',
       methodLabel[p.method] || p.method || '',
       p.note || '',
       p.received_by || '',
-      String(p.created_at || '').slice(0, 10),
+      String(p.paid_at || p.created_at || '').slice(0, 10),
     ]));
   } catch (err) {
     console.error(err);
@@ -3487,7 +3458,7 @@ app.get('/accounting/export/coach-report.csv', accountingGuards, (req, res) => {
     const coaches = db.prepare('SELECT * FROM coaches WHERE is_active = 1 ORDER BY id DESC').all();
     const fa = new Intl.NumberFormat('fa-IR');
     const rows = coaches.map((c) => {
-      const share = db.prepare('SELECT COALESCE(SUM(coach_share),0) AS total FROM payments WHERE coach_id = ? AND substr(created_at,1,10) BETWEEN ? AND ?').get(c.id, f, t);
+      const share = db.prepare('SELECT COALESCE(SUM(COALESCE(coach_share_amount, coach_share)),0) AS total FROM payments WHERE coach_id = ? AND substr(COALESCE(paid_at, created_at),1,10) BETWEEN ? AND ?').get(c.id, f, t);
       const settled = db.prepare('SELECT COALESCE(SUM(amount),0) AS total FROM coach_settlements WHERE coach_id = ? AND period = ?').get(c.id, period);
       const sports = db.prepare('SELECT sport, commission_percent, commission_amount FROM coach_sports WHERE coach_id = ?').all(c.id).map((s) => `${s.sport}${s.commission_amount != null && s.commission_amount > 0 ? ` (${fa.format(s.commission_amount)})` : s.commission_percent ? ` (${fa.format(s.commission_percent)}٪)` : ''}`).join(' | ');
       const shareTotal = Number(share.total) || 0;
