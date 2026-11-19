@@ -2674,7 +2674,8 @@ function sendCsv(res, filename, headers, rows) {
 function mapPaymentRow(p) {
   const type = p.type || 'manual';
   const direction = p.direction || (type === 'coach_payout' ? 'out' : 'in');
-  const shareAmount = Number(p.coach_share_amount ?? p.coach_share) || 0;
+  const shareAmount = Number(p.coach_share_amount) > 0
+    ? Number(p.coach_share_amount) : (Number(p.coach_share) || 0);
   const sharePercent = Number(p.coach_share_percent) || (p.amount && shareAmount
     ? Math.round((shareAmount / Number(p.amount)) * 1000) / 10 : 0);
   return {
@@ -2724,7 +2725,8 @@ app.get('/accounting/summary', accountingGuards, (req, res) => {
       'SELECT * FROM payments WHERE substr(COALESCE(paid_at, created_at), 1, 10) BETWEEN ? AND ? ORDER BY id DESC'
     ).all(f, t);
     const incomePayments = historicalPayments.filter((p) => p.direction !== 'out');
-    const snapshotShare = (p) => Number(p.coach_share_amount ?? p.coach_share) || 0;
+    const snapshotShare = (p) => Number(p.coach_share_amount) > 0
+      ? Number(p.coach_share_amount) : (Number(p.coach_share) || 0);
     const specialtyGroups = new Map();
     for (const p of incomePayments) {
       const rawSport = String(p.sport || '').trim();
@@ -3437,7 +3439,7 @@ app.get('/accounting/export/payments.csv', accountingGuards, (req, res) => {
       p.member_name || '',
       p.sport || '',
       fa.format(p.amount || 0),
-      fa.format(p.coach_share_amount ?? p.coach_share ?? 0),
+      fa.format(Number(p.coach_share_amount) > 0 ? p.coach_share_amount : (p.coach_share || 0)),
       typeLabel[p.type] || p.type || '',
       methodLabel[p.method] || p.method || '',
       p.note || '',
@@ -3458,7 +3460,7 @@ app.get('/accounting/export/coach-report.csv', accountingGuards, (req, res) => {
     const coaches = db.prepare('SELECT * FROM coaches WHERE is_active = 1 ORDER BY id DESC').all();
     const fa = new Intl.NumberFormat('fa-IR');
     const rows = coaches.map((c) => {
-      const share = db.prepare('SELECT COALESCE(SUM(COALESCE(coach_share_amount, coach_share)),0) AS total FROM payments WHERE coach_id = ? AND substr(COALESCE(paid_at, created_at),1,10) BETWEEN ? AND ?').get(c.id, f, t);
+      const share = db.prepare('SELECT COALESCE(SUM(COALESCE(NULLIF(coach_share_amount, 0), coach_share)),0) AS total FROM payments WHERE coach_id = ? AND substr(COALESCE(paid_at, created_at),1,10) BETWEEN ? AND ?').get(c.id, f, t);
       const settled = db.prepare('SELECT COALESCE(SUM(amount),0) AS total FROM coach_settlements WHERE coach_id = ? AND period = ?').get(c.id, period);
       const sports = db.prepare('SELECT sport, commission_percent, commission_amount FROM coach_sports WHERE coach_id = ?').all(c.id).map((s) => `${s.sport}${s.commission_amount != null && s.commission_amount > 0 ? ` (${fa.format(s.commission_amount)})` : s.commission_percent ? ` (${fa.format(s.commission_percent)}٪)` : ''}`).join(' | ');
       const shareTotal = Number(share.total) || 0;
