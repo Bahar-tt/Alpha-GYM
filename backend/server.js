@@ -2669,7 +2669,36 @@ function sendCsv(res, filename, headers, rows) {
   addColumn('payments', 'paid_at', 'TEXT');
   addColumn('expenses', 'spent_at', 'TEXT');
   addColumn('expenses', 'notes', 'TEXT');
+  addColumn('expenses', 'subcategory', 'TEXT');
+  addColumn('expenses', 'vendor', 'TEXT');
+  addColumn('expenses', 'invoice_no', 'TEXT');
+  addColumn('expenses', 'payment_account', "TEXT DEFAULT 'cash'");
+  addColumn('expenses', 'status', "TEXT NOT NULL DEFAULT 'approved'");
+  addColumn('expenses', 'approved_by', 'INTEGER');
+  addColumn('expenses', 'approved_at', 'TEXT');
+  addColumn('expenses', 'approval_note', 'TEXT');
 })();
+
+const STANDARD_EXPENSE_CATEGORIES = [
+  ['عملیات و ساختمان', 'اجاره'], ['عملیات و ساختمان', 'آب، برق و گاز'],
+  ['عملیات و ساختمان', 'اینترنت و تلفن'], ['عملیات و ساختمان', 'نظافت و خدمات'],
+  ['تجهیزات', 'خرید تجهیزات'], ['تجهیزات', 'تعمیر و نگهداری تجهیزات'],
+  ['منابع انسانی', 'حقوق و دستمزد'], ['منابع انسانی', 'مزایا و بیمه'],
+  ['بازاریابی', 'تبلیغات'], ['بازاریابی', 'تولید محتوا'],
+  ['مالی و اداری', 'مالیات و عوارض'], ['مالی و اداری', 'نرم‌افزار و اشتراک'],
+  ['مالی و اداری', 'کارمزد بانکی'], ['مصرفی', 'مواد مصرفی'],
+  ['مصرفی', 'آب و پذیرایی'], ['سایر', 'عمومی'],
+];
+db.exec(`CREATE TABLE IF NOT EXISTS expense_categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  parent TEXT NOT NULL,
+  name TEXT NOT NULL,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(parent, name)
+)`);
+const seedExpenseCategory = db.prepare('INSERT OR IGNORE INTO expense_categories (parent, name, sort_order) VALUES (?, ?, ?)');
+STANDARD_EXPENSE_CATEGORIES.forEach(([parent, name], index) => seedExpenseCategory.run(parent, name, index));
 
 function mapPaymentRow(p) {
   const type = p.type || 'manual';
@@ -2700,9 +2729,18 @@ function mapExpenseRow(e) {
   return {
     id: e.id,
     category: e.category || 'عمومی',
+    subcategory: e.subcategory || e.category || 'عمومی',
     title: e.title || '',
     amount: Number(e.amount) || 0,
     notes: e.notes || e.note || null,
+    vendor: e.vendor || null,
+    invoice_no: e.invoice_no || null,
+    payment_account: e.payment_account || 'cash',
+    status: e.status || 'approved',
+    recorded_by: e.recorded_by || null,
+    approved_by: e.approved_by || null,
+    approved_at: e.approved_at || null,
+    approval_note: e.approval_note || null,
     spent_at: e.spent_at || e.date || String(e.created_at || '').slice(0, 10),
     created_at: e.created_at,
   };
@@ -2710,8 +2748,50 @@ function mapExpenseRow(e) {
 
 const accountingGuards = [requireAuth, requireAdmin, requireFeature('accounting')];
 const expenseGuards = [requireAuth, requireExpenseAccess, requireFeature('accounting')];
+const expenseReviewGuards = [requireAuth, requireAdmin, requireFeature('accounting')];
+
+app.get('/accounting/expense-categories', expenseGuards, (_req, res) => {
+  try {
+    const rows = db.prepare('SELECT id, parent, name, sort_order FROM expense_categories WHERE is_active = 1 ORDER BY sort_order, id').all();
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load expense categories' });
+  }
+});
 
 // 📊 خلاصه مالی
+app.get('/accounting/incomplete-snapshots', accountingGuards, (req, res) => {
+  try {
+    const { f, t } = periodBounds(req.query.from, req.query.to);
+    const rows = db.prepare(`
+      SELECT p.id, p.member_id, COALESCE(p.member_name, m.name, 'بدون نام') AS member_name,
+             p.sport, p.amount, p.paid_at, p.created_at, p.coach_id,
+             COALESCE(p.coach_name_snapshot, c.name, 'بدون مربی') AS coach_name,
+             COALESCE(p.coach_share, 0) AS legacy_share,
+             COALESCE(p.coach_share_amount, 0) AS snapshot_share,
+             COALESCE(p.coach_share_percent, 0) AS snapshot_percent,
+             COALESCE(cs.commission_amount, 0) AS current_fixed,
+             COALESCE(cs.commission_percent, c.default_share, 0) AS current_percent
+      FROM payments p
+      LEFT JOIN members m ON m.id = p.member_id
+      LEFT JOIN coaches c ON c.id = p.coach_id
+      LEFT JOIN coach_sports cs ON cs.coach_id = p.coach_id AND LOWER(TRIM(cs.sport)) = LOWER(TRIM(p.sport))
+      WHERE COALESCE(p.direction, 'in') != 'out' AND p.coach_id IS NOT NULL
+        AND COALESCE(p.coach_share_amount, 0) = 0 AND COALESCE(p.coach_share, 0) = 0
+        AND substr(COALESCE(p.paid_at, p.created_at), 1, 10) BETWEEN ? AND ?
+      ORDER BY COALESCE(p.paid_at, p.created_at), p.id
+    `).all(f, t).map((r) => ({
+      ...r,
+      estimated_share: Number(r.current_fixed) > 0 ? Number(r.current_fixed) : Math.round(Number(r.amount || 0) * Number(r.current_percent || 0) / 100),
+    }));
+    res.json({ from: f, to: t, count: rows.length, total_amount: rows.reduce((s, r) => s + Number(r.amount || 0), 0), rows });
+  } catch (err) {
+    console.error('[accounting/incomplete-snapshots]', err);
+    res.status(500).json({ error: 'Failed to load incomplete snapshots' });
+  }
+});
+
 app.get('/accounting/summary', accountingGuards, (req, res) => {
   try {
     const { f, t } = periodBounds(req.query.from, req.query.to);
@@ -2782,7 +2862,8 @@ app.get('/accounting/summary', accountingGuards, (req, res) => {
         SELECT substr(COALESCE(date, spent_at, created_at), 1, 7) AS month,
                0 AS income, 0 AS payout, amount AS expense
         FROM expenses
-        WHERE substr(COALESCE(date, spent_at, created_at), 1, 10) BETWEEN ? AND ?
+        WHERE COALESCE(status, 'approved') = 'approved'
+          AND substr(COALESCE(date, spent_at, created_at), 1, 10) BETWEEN ? AND ?
       )
       GROUP BY month
       ORDER BY month
@@ -2804,7 +2885,8 @@ app.get('/accounting/summary', accountingGuards, (req, res) => {
       SELECT COALESCE(NULLIF(TRIM(category), ''), 'عمومی') AS label,
              COUNT(*) AS count, COALESCE(SUM(amount), 0) AS amount
       FROM expenses
-      WHERE substr(COALESCE(date, spent_at, created_at), 1, 10) BETWEEN ? AND ?
+      WHERE COALESCE(status, 'approved') = 'approved'
+        AND substr(COALESCE(date, spent_at, created_at), 1, 10) BETWEEN ? AND ?
       GROUP BY label ORDER BY amount DESC
     `).all(f, t).map((r) => ({ label: r.label, count: Number(r.count) || 0, amount: Number(r.amount) || 0 }));
     const actualNet = paymentsIn - paymentsOut - expenseTotal;
@@ -3194,10 +3276,14 @@ app.get('/accounting/expenses', expenseGuards, (req, res) => {
       where.push('category = ?');
       params.push(String(req.query.category));
     }
+    if (req.query.status && ['pending', 'approved', 'rejected'].includes(String(req.query.status))) {
+      where.push("COALESCE(status, 'approved') = ?");
+      params.push(String(req.query.status));
+    }
     const whereSql = where.join(' AND ');
-    const rows = db.prepare(`SELECT * FROM expenses WHERE ${whereSql} ORDER BY id DESC`).all(...params);
+    const rows = db.prepare(`SELECT * FROM expenses WHERE ${whereSql} ORDER BY id DESC`).all(...params).map(mapExpenseRow);
     const agg = db.prepare(`SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS count FROM expenses WHERE ${whereSql}`).get(...params);
-    const categories = db.prepare('SELECT category, COALESCE(SUM(amount),0) AS total, COUNT(*) AS count FROM expenses WHERE date BETWEEN ? AND ? GROUP BY category ORDER BY total DESC').all(f, t);
+    const categories = db.prepare("SELECT category, COALESCE(NULLIF(subcategory, ''), category) AS subcategory, COALESCE(SUM(amount),0) AS total, COUNT(*) AS count FROM expenses WHERE COALESCE(status, 'approved') = 'approved' AND date BETWEEN ? AND ? GROUP BY category, subcategory ORDER BY total DESC").all(f, t);
     res.json({ rows, total: Number(agg.total) || 0, count: Number(agg.count) || 0, categories });
   } catch (err) {
     console.error(err);
@@ -3207,7 +3293,7 @@ app.get('/accounting/expenses', expenseGuards, (req, res) => {
 
 app.post('/accounting/expenses', expenseGuards, (req, res) => {
   try {
-    const { title, amount, category, date, note, spent_at, notes } = req.body || {};
+    const { title, amount, category, subcategory, date, note, spent_at, notes, vendor, invoice_no, payment_account } = req.body || {};
     if (!title || !String(title).trim()) {
       return res.status(400).json({ error: 'عنوان هزینه الزامی است' });
     }
@@ -3217,15 +3303,26 @@ app.post('/accounting/expenses', expenseGuards, (req, res) => {
     }
     const day = date || spent_at;
     const noteVal = note != null ? note : notes;
+    const isAdmin = req.staff.role === 'admin';
+    const status = isAdmin ? 'approved' : 'pending';
     const createExpense = db.transaction(() => {
-      const r = db.prepare('INSERT INTO expenses (title, amount, category, date, note, recorded_by) VALUES (?, ?, ?, ?, ?, ?)')
+      const r = db.prepare(`INSERT INTO expenses
+        (title, amount, category, subcategory, date, note, recorded_by, vendor, invoice_no, payment_account, status, approved_by, approved_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(
           String(title).trim(),
           amt,
           category ? String(category).trim() : 'عمومی',
-          day ? String(day).slice(0, 10) : new Date().toISOString().slice(0, 10),
+          subcategory ? String(subcategory).trim() : (category ? String(category).trim() : 'عمومی'),
+          day ? String(day).slice(0, 10) : todayIso(),
           noteVal ? String(noteVal).trim() : null,
-          req.staff.full_name
+          req.staff.full_name,
+          vendor ? String(vendor).trim() : null,
+          invoice_no ? String(invoice_no).trim() : null,
+          ['cash', 'card', 'transfer', 'pos', 'gateway', 'other'].includes(String(payment_account)) ? String(payment_account) : 'cash',
+          status,
+          isAdmin ? req.staff.id : null,
+          isAdmin ? new Date().toISOString() : null
         );
       const row = db.prepare('SELECT * FROM expenses WHERE id = ?').get(r.lastInsertRowid);
       audit(req, 'accounting.expense', { entityType: 'expense', entityId: r.lastInsertRowid, detail: { after: row } });
@@ -3235,6 +3332,25 @@ app.post('/accounting/expenses', expenseGuards, (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create expense' });
+  }
+});
+
+app.put('/accounting/expenses/:id/review', expenseReviewGuards, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const status = ['approved', 'rejected'].includes(String(req.body?.status)) ? String(req.body.status) : null;
+    if (!status) return res.status(400).json({ error: 'وضعیت تأیید نامعتبر است' });
+    const existing = db.prepare('SELECT * FROM expenses WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'هزینه پیدا نشد' });
+    db.transaction(() => {
+      db.prepare('UPDATE expenses SET status = ?, approved_by = ?, approved_at = ?, approval_note = ? WHERE id = ?')
+        .run(status, req.staff.id, new Date().toISOString(), req.body?.note ? String(req.body.note).trim() : null, id);
+      audit(req, `accounting.expense_${status}`, { entityType: 'expense', entityId: id, detail: { before: existing, status } });
+    })();
+    res.json(mapExpenseRow(db.prepare('SELECT * FROM expenses WHERE id = ?').get(id)));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to review expense' });
   }
 });
 

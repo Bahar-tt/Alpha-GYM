@@ -8,7 +8,12 @@ import {
   getCoachPayroll,
   getMemberFinancialAlerts,
   getExpenses,
+  getExpenseCategories,
+  reviewExpense,
+  getIncompleteSnapshots,
   type Expense,
+  type ExpenseCategory,
+  type IncompleteSnapshot,
   type AccountingSummary,
 } from '../services/accountingService';
 import { getCoaches, type Coach } from '../services/coachService';
@@ -43,7 +48,24 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'ledger', label: 'دفتر مالی' },
 ];
 
-const EXPENSE_CATEGORIES = ['اجاره', 'قبوض', 'تجهیزات', 'حقوق', 'تبلیغات', 'تعمیرات', 'عمومی'];
+const FALLBACK_EXPENSE_CATEGORIES: ExpenseCategory[] = [
+  { id: 1, parent: 'عملیات و ساختمان', name: 'اجاره', sort_order: 1 },
+  { id: 2, parent: 'عملیات و ساختمان', name: 'آب، برق و گاز', sort_order: 2 },
+  { id: 3, parent: 'عملیات و ساختمان', name: 'اینترنت و تلفن', sort_order: 3 },
+  { id: 4, parent: 'عملیات و ساختمان', name: 'نظافت و خدمات', sort_order: 4 },
+  { id: 5, parent: 'تجهیزات', name: 'خرید تجهیزات', sort_order: 5 },
+  { id: 6, parent: 'تجهیزات', name: 'تعمیر و نگهداری تجهیزات', sort_order: 6 },
+  { id: 7, parent: 'منابع انسانی', name: 'حقوق و دستمزد', sort_order: 7 },
+  { id: 8, parent: 'منابع انسانی', name: 'مزایا و بیمه', sort_order: 8 },
+  { id: 9, parent: 'بازاریابی', name: 'تبلیغات', sort_order: 9 },
+  { id: 10, parent: 'بازاریابی', name: 'تولید محتوا', sort_order: 10 },
+  { id: 11, parent: 'مالی و اداری', name: 'مالیات و عوارض', sort_order: 11 },
+  { id: 12, parent: 'مالی و اداری', name: 'نرم‌افزار و اشتراک', sort_order: 12 },
+  { id: 13, parent: 'مالی و اداری', name: 'کارمزد بانکی', sort_order: 13 },
+  { id: 14, parent: 'مصرفی', name: 'مواد مصرفی', sort_order: 14 },
+  { id: 15, parent: 'مصرفی', name: 'آب و پذیرایی', sort_order: 15 },
+  { id: 16, parent: 'سایر', name: 'عمومی', sort_order: 16 },
+];
 
 function fmt(n: number) {
   return Math.round(n).toLocaleString('fa-IR');
@@ -91,12 +113,26 @@ function downloadReport(data: AccountingSummary, from: JalaliDate, to: JalaliDat
   printWindow.print();
 }
 
+function downloadIncompleteSnapshots(rows: IncompleteSnapshot[]) {
+  const header = ['شناسه پرداخت', 'عضو', 'رشته', 'مربی', 'مبلغ', 'تاریخ', 'درصد فعلی', 'سهم برآوردی فعلی'];
+  const content = `\uFEFF${[header, ...rows.map((r) => [r.id, r.member_name, r.sport || '', r.coach_name, r.amount, r.paid_at || '', r.current_percent, r.estimated_share])]
+    .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join('\t')).join('\n')}`;
+  const url = URL.createObjectURL(new Blob([content], { type: 'application/vnd.ms-excel;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'alpha-gym-incomplete-snapshots.xls';
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function Accounting() {
   const { isAdmin } = useAuth();
   const [data, setData] = useState<AccountingSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('overview');
   const [coaches, setCoaches] = useState<Coach[]>([]);
+  const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>(FALLBACK_EXPENSE_CATEGORIES);
+  const [incompleteSnapshots, setIncompleteSnapshots] = useState<IncompleteSnapshot[]>([]);
   const [payroll, setPayroll] = useState<{ coach_id: number; coach_name: string; gross: number; net: number; items: number }[]>([]);
   const [alerts, setAlerts] = useState<{ member_name: string; alert_type: 'overdue' | 'due_soon'; due_date: string; amount: number }[]>([]);
   const [showPay, setShowPay] = useState(false);
@@ -111,16 +147,20 @@ export default function Accounting() {
   const load = useCallback(async () => {
     if (!isAdmin) { setLoading(false); return; }
     setLoading(true);
-    const [s, c, p, a] = await Promise.all([
+    const [s, c, p, a, categoryResult, snapshotResult] = await Promise.all([
       getAccountingSummary(jalaliToGregorianIso(fromDate), jalaliToGregorianIso(toDate)),
       getCoaches(),
       getCoachPayroll(jalaliToGregorianIso(fromDate), jalaliToGregorianIso(toDate)),
       getMemberFinancialAlerts(7),
+      getExpenseCategories(),
+      getIncompleteSnapshots(jalaliToGregorianIso(fromDate), jalaliToGregorianIso(toDate)),
     ]);
     if (s.data) setData(s.data);
     setCoaches(c.data || []);
     setPayroll(p.data || []);
     setAlerts(a.data?.rows || []);
+    if (categoryResult.data?.length) setExpenseCategories(categoryResult.data);
+    setIncompleteSnapshots(snapshotResult.data?.rows || []);
     setLoading(false);
   }, [fromDate, toDate, isAdmin]);
 
@@ -256,6 +296,7 @@ export default function Accounting() {
       {!loading && data && tab === 'overview' && (
         <>
         {alerts.length > 0 && <div className="panel-card p-4" style={{ borderColor: 'var(--warning)' }}><div className="flex items-center justify-between gap-3"><div><strong style={{ color: 'var(--warning)' }}>هشدار مالی اعضا</strong><p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>{alerts.filter((x) => x.alert_type === 'overdue').length} بدهی عقب‌افتاده و {alerts.filter((x) => x.alert_type === 'due_soon').length} سررسید نزدیک</p></div><button type="button" className="btn-outline" onClick={() => setTab('payroll')}>مشاهده حقوق و هشدارها</button></div></div>}
+        <IncompleteSnapshotsPanel rows={incompleteSnapshots} />
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="panel-card p-5">
             <h3 className="section-title mb-4 flex items-center gap-2">
@@ -403,6 +444,11 @@ export default function Accounting() {
             await deleteExpense(id);
             load();
           }}
+          onReview={async (id, status) => {
+            const note = status === 'rejected' ? window.prompt('دلیل رد هزینه را وارد کنید:') || undefined : undefined;
+            await reviewExpense(id, status, note);
+            load();
+          }}
         />
       )}
 
@@ -468,6 +514,7 @@ export default function Accounting() {
 
       {showExp && (
         <ExpenseModal
+          categories={expenseCategories}
           onClose={() => setShowExp(false)}
           onSave={async (payload) => {
             await addExpense(payload);
@@ -565,6 +612,17 @@ function FlowRow({
       </span>
     </div>
   );
+}
+
+function IncompleteSnapshotsPanel({ rows }: { rows: IncompleteSnapshot[] }) {
+  return <div className="panel-card overflow-hidden" style={{ borderColor: rows.length ? 'var(--warning)' : 'var(--border)' }}>
+    <div className="p-5 flex flex-wrap items-center justify-between gap-3">
+      <div><h3 className="section-title">گزارش تراکنش‌های دارای snapshot ناقص</h3><p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>این گزارش برای بررسی مدیر است؛ سهم برآوردی با قوانین فعلی جایگزین سابقه مالی نمی‌شود.</p></div>
+      <button type="button" className="btn-outline" onClick={() => downloadIncompleteSnapshots(rows)} disabled={!rows.length}><Download size={15} /> دانلود Excel</button>
+    </div>
+    <div className="px-5 pb-4 text-sm" style={{ color: rows.length ? 'var(--warning)' : 'var(--success)' }}>{rows.length ? `${fmt(rows.length)} تراکنش، با مبلغ کل ${fmt(rows.reduce((sum, r) => sum + r.amount, 0))} تومان` : 'در این بازه تراکنش ناقص شناسایی نشد.'}</div>
+    {rows.length > 0 && <div className="overflow-x-auto"><table className="w-full min-w-[900px]"><thead><tr style={{ background: 'var(--bg-muted)' }}>{['شناسه', 'عضو', 'رشته', 'مربی', 'مبلغ', 'تاریخ', 'برآورد سهم فعلی'].map((h) => <th key={h} className="text-right text-xs px-4 py-3" style={{ color: 'var(--text-secondary)' }}>{h}</th>)}</tr></thead><tbody>{rows.map((r) => <tr key={r.id} className="table-row"><td className="px-4 py-3 text-xs">{r.id}</td><td className="px-4 py-3 text-sm">{r.member_name}</td><td className="px-4 py-3 text-sm">{r.sport || '—'}</td><td className="px-4 py-3 text-sm">{r.coach_name}</td><td className="px-4 py-3 text-sm font-bold">{fmt(r.amount)}</td><td className="px-4 py-3 text-xs">{r.paid_at ? formatJalali(r.paid_at.slice(0, 10)) : '—'}</td><td className="px-4 py-3 text-sm" style={{ color: 'var(--warning)' }}>{fmt(r.estimated_share)} ({fmt(r.current_percent)}٪)</td></tr>)}</tbody></table></div>}
+  </div>;
 }
 
 function PayrollPanel({ rows, alerts }: { rows: { coach_id: number; coach_name: string; gross: number; net: number; items: number }[]; alerts: { member_name: string; alert_type: 'overdue' | 'due_soon'; due_date: string; amount: number }[] }) {
@@ -702,18 +760,20 @@ function PaymentsTable({
 
 function StaffExpenseAccounting() {
   const [rows, setRows] = useState<Expense[]>([]);
+  const [categories, setCategories] = useState<ExpenseCategory[]>(FALLBACK_EXPENSE_CATEGORIES);
   const [showExpense, setShowExpense] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const load = async () => {
     setLoading(true);
-    const result = await getExpenses();
+    const [result, categoryResult] = await Promise.all([getExpenses(), getExpenseCategories()]);
     if (result.error) setError(result.error.message);
     else setRows(result.data?.rows || []);
+    if (categoryResult.data?.length) setCategories(categoryResult.data);
     setLoading(false);
   };
   useEffect(() => { void load(); }, []);
-  const save = async (payload: { category: string; title: string; amount: number; spent_at?: string }) => {
+  const save = async (payload: { category: string; subcategory?: string; title: string; amount: number; spent_at?: string; vendor?: string; invoice_no?: string; payment_account?: string; notes?: string }) => {
     const result = await addExpense(payload);
     if (result.error) { setError(result.error.message); return; }
     setShowExpense(false); await load();
@@ -722,23 +782,25 @@ function StaffExpenseAccounting() {
     <div className="page-hero flex flex-wrap items-center justify-between gap-4"><div><h1 className="page-title">ثبت هزینه‌های جاری</h1><p className="page-subtitle">این بخش فقط برای ثبت هزینه‌های جاری منشی فعال است.</p></div><button type="button" className="btn-primary" onClick={() => setShowExpense(true)}><Plus size={16} /> ثبت هزینه جاری</button></div>
     {error && <div className="rounded-xl p-3 text-sm" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>{error}</div>}
     <div className="panel-card overflow-hidden"><table className="w-full min-w-[560px]"><thead><tr style={{ background: 'var(--bg-muted)' }}>{['تاریخ', 'دسته‌بندی', 'عنوان', 'مبلغ'].map((h) => <th key={h} className="text-right text-xs px-4 py-3" style={{ color: 'var(--text-secondary)' }}>{h}</th>)}</tr></thead><tbody>{loading ? <tr><td colSpan={4} className="p-8 text-center text-sm">در حال دریافت…</td></tr> : rows.length === 0 ? <tr><td colSpan={4} className="p-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>هزینه‌ای ثبت نشده است.</td></tr> : rows.map((e) => <tr key={e.id} className="table-row"><td className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>{formatJalali(String(e.spent_at).slice(0, 10))}</td><td className="px-4 py-3"><span className="badge badge-warning">{e.category}</span></td><td className="px-4 py-3 text-sm">{e.title}</td><td className="px-4 py-3 text-sm font-bold" style={{ color: 'var(--danger)' }}>{fmt(e.amount)}</td></tr>)}</tbody></table></div>
-    {showExpense && <ExpenseModal onClose={() => setShowExpense(false)} onSave={save} />}
+    {showExpense && <ExpenseModal categories={categories} onClose={() => setShowExpense(false)} onSave={save} />}
   </div>;
 }
 
 function ExpensesTable({
   rows,
   onDelete,
+  onReview,
 }: {
   rows: AccountingSummary['expenses'];
   onDelete: (id: number) => void;
+  onReview: (id: number, status: 'approved' | 'rejected') => void;
 }) {
   return (
     <div className="panel-card overflow-hidden">
       <table className="w-full min-w-[560px]">
         <thead>
           <tr style={{ background: 'var(--bg-muted)' }}>
-            {['تاریخ', 'دسته‌بندی', 'عنوان', 'مبلغ', ''].map((h) => (
+            {['تاریخ', 'دسته‌بندی', 'عنوان', 'مبلغ', 'وضعیت', 'ثبت‌کننده', ''].map((h) => (
               <th key={h || 'a'} className="text-right text-xs px-4 py-3" style={{ color: 'var(--text-secondary)' }}>
                 {h}
               </th>
@@ -748,7 +810,7 @@ function ExpensesTable({
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={5} className="text-center py-10 text-sm" style={{ color: 'var(--text-muted)' }}>
+              <td colSpan={7} className="text-center py-10 text-sm" style={{ color: 'var(--text-muted)' }}>
                 هزینه‌ای ثبت نشده
               </td>
             </tr>
@@ -760,6 +822,7 @@ function ExpensesTable({
                 </td>
                 <td className="px-4 py-3">
                   <span className="badge badge-warning">{e.category}</span>
+                  {e.subcategory && <div className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>{e.subcategory}</div>}
                 </td>
                 <td className="px-4 py-3 text-sm" style={{ color: 'var(--text)' }}>
                   {e.title}
@@ -767,7 +830,10 @@ function ExpensesTable({
                 <td className="px-4 py-3 text-sm font-bold" style={{ color: 'var(--danger)' }}>
                   {fmt(e.amount)}
                 </td>
+                <td className="px-4 py-3"><span className={`badge ${e.status === 'approved' ? 'badge-success' : e.status === 'rejected' ? 'badge-danger' : 'badge-warning'}`}>{e.status === 'approved' ? 'تأیید شده' : e.status === 'rejected' ? 'رد شده' : 'در انتظار تأیید'}</span></td>
+                <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>{e.recorded_by || '—'}</td>
                 <td className="px-4 py-3">
+                  {e.status === 'pending' && <><button type="button" className="text-xs ml-3" style={{ color: 'var(--success)' }} onClick={() => onReview(e.id, 'approved')}>تأیید</button><button type="button" className="text-xs ml-3" style={{ color: 'var(--danger)' }} onClick={() => onReview(e.id, 'rejected')}>رد</button></>}
                   <button type="button" onClick={() => onDelete(e.id)} style={{ color: 'var(--text-muted)' }}>
                     <Trash2 size={14} />
                   </button>
@@ -880,15 +946,24 @@ function PaymentModal({
 }
 
 function ExpenseModal({
+  categories,
   onClose,
   onSave,
 }: {
+  categories: ExpenseCategory[];
   onClose: () => void;
-  onSave: (p: { category: string; title: string; amount: number; spent_at?: string }) => Promise<void>;
+  onSave: (p: { category: string; subcategory?: string; title: string; amount: number; spent_at?: string; vendor?: string; invoice_no?: string; payment_account?: string; notes?: string }) => Promise<void>;
 }) {
-  const [category, setCategory] = useState('عمومی');
+  const parents = Array.from(new Set(categories.map((c) => c.parent)));
+  const [category, setCategory] = useState(parents[0] || 'سایر');
+  const subcategories = categories.filter((c) => c.parent === category);
+  const [subcategory, setSubcategory] = useState(subcategories[0]?.name || '');
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
+  const [vendor, setVendor] = useState('');
+  const [invoiceNo, setInvoiceNo] = useState('');
+  const [paymentAccount, setPaymentAccount] = useState('');
+  const [notes, setNotes] = useState('');
   const [spentAt, setSpentAt] = useState<JalaliDate>(() => todayJalali());
   const [saving, setSaving] = useState(false);
 
@@ -900,7 +975,7 @@ function ExpenseModal({
         onSubmit={async (e) => {
           e.preventDefault();
           setSaving(true);
-          await onSave({ category, title, amount: Number(amount) || 0, spent_at: jalaliToGregorianIso(spentAt) });
+          await onSave({ category, subcategory, title, amount: Number(amount) || 0, vendor: vendor || undefined, invoice_no: invoiceNo || undefined, payment_account: paymentAccount || undefined, notes: notes || undefined, spent_at: jalaliToGregorianIso(spentAt) });
           setSaving(false);
         }}
       >
@@ -911,12 +986,13 @@ function ExpenseModal({
         <div className="p-5 space-y-3">
           <div>
             <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>دسته‌بندی</label>
-            <select className="input-field" value={category} onChange={(e) => setCategory(e.target.value)}>
-              {EXPENSE_CATEGORIES.map((c) => (
+            <select className="input-field" value={category} onChange={(e) => { setCategory(e.target.value); setSubcategory(categories.find((c) => c.parent === e.target.value)?.name || ''); }}>
+              {parents.map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
             </select>
           </div>
+          <div><label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>زیرگروه</label><select className="input-field" value={subcategory} onChange={(e) => setSubcategory(e.target.value)}>{subcategories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}</select></div>
           <div>
             <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>عنوان</label>
             <input className="input-field" required value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -925,6 +1001,9 @@ function ExpenseModal({
             <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>مبلغ (تومان)</label>
             <input className="input-field" type="number" required value={amount} onChange={(e) => setAmount(e.target.value)} />
           </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><div><label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>فروشنده / طرف حساب</label><input className="input-field" value={vendor} onChange={(e) => setVendor(e.target.value)} /></div><div><label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>شماره فاکتور</label><input className="input-field" value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} /></div></div>
+          <div><label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>حساب پرداخت</label><input className="input-field" placeholder="صندوق، کارتخوان، بانک..." value={paymentAccount} onChange={(e) => setPaymentAccount(e.target.value)} /></div>
+          <div><label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>یادداشت</label><textarea className="input-field min-h-16" value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
           <JalaliDatePicker label="تاریخ هزینه" value={spentAt} onChange={(d) => d && setSpentAt(d)} required />
         </div>
         <div className="px-5 py-4 flex flex-row-reverse gap-2" style={{ background: 'var(--bg-muted)' }}>

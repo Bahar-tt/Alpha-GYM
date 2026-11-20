@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiPost } from './api';
+import { apiDelete, apiGet, apiPost, apiPut } from './api';
 
 export interface AccountingTotals {
   monthly_revenue: number;
@@ -50,11 +50,29 @@ export interface Payment {
 export interface Expense {
   id: number;
   category: string;
+  subcategory?: string | null;
   title: string;
   amount: number;
   notes?: string | null;
+  vendor?: string | null;
+  invoice_no?: string | null;
+  payment_account?: string | null;
+  status?: 'pending' | 'approved' | 'rejected' | string;
+  recorded_by?: string | null;
+  approved_by?: number | null;
+  approved_at?: string | null;
+  approval_note?: string | null;
   spent_at: string;
   created_at?: string;
+}
+
+export interface ExpenseCategory { id: number; parent: string; name: string; sort_order: number; }
+
+export interface IncompleteSnapshot {
+  id: number; member_id?: number | null; member_name: string; sport?: string | null;
+  amount: number; paid_at?: string | null; coach_id: number; coach_name: string;
+  legacy_share: number; snapshot_share: number; snapshot_percent: number;
+  current_percent: number; estimated_share: number;
 }
 
 export interface LedgerItem {
@@ -129,10 +147,14 @@ export async function deletePayment(id: number) {
 
 export async function addExpense(payload: {
   category: string;
+  subcategory?: string;
   title: string;
   amount: number;
   notes?: string;
   spent_at?: string;
+  vendor?: string;
+  invoice_no?: string;
+  payment_account?: string;
 }) {
   const result = await apiPost<Expense>('/accounting/expenses', payload);
   if (result.error) return { data: null, error: { message: result.error } };
@@ -142,6 +164,24 @@ export async function addExpense(payload: {
 export async function deleteExpense(id: number) {
   const result = await apiDelete(`/accounting/expenses/${id}`);
   return { error: result.error ? { message: result.error } : null };
+}
+
+export async function getExpenseCategories() {
+  const result = await apiGet<ExpenseCategory[]>('/accounting/expense-categories');
+  return result.error ? { data: [], error: { message: result.error } } : { data: result.data || [], error: null };
+}
+
+export async function reviewExpense(id: number, status: 'approved' | 'rejected', note?: string) {
+  const result = await apiPut<Expense>(`/accounting/expenses/${id}/review`, { status, note });
+  return result.error ? { data: null, error: { message: result.error } } : { data: result.data, error: null };
+}
+
+export async function getIncompleteSnapshots(from?: string, to?: string) {
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  const result = await apiGet<{ from: string; to: string; count: number; total_amount: number; rows: IncompleteSnapshot[] }>(`/accounting/incomplete-snapshots?${params.toString()}`);
+  return result.error ? { data: null, error: { message: result.error } } : { data: result.data, error: null };
 }
 
 export async function getExpenses(from?: string, to?: string) {
