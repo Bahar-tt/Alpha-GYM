@@ -184,7 +184,7 @@ export async function updateMemberExpiry(
   id: string,
   expiryDate: string,
   weeklySessions?: number,
-  opts?: { amount?: number; months?: number; membership_type?: string },
+  opts?: { amount?: number; months?: number; membership_type?: string; used_sessions?: number },
 ) {
   const getOne = await apiGet<ApiMember[]>('/members');
   if (getOne.error || !getOne.data) {
@@ -218,7 +218,7 @@ export async function updateMemberExpiry(
     height_cm: existing.height_cm,
     weight_kg: existing.weight_kg,
     _renewal: opts
-      ? { amount: opts.amount ?? existing.monthly_fee ?? 0, months: opts.months ?? 1 }
+      ? { amount: opts.amount ?? existing.monthly_fee ?? 0, months: opts.months ?? 1, used_sessions: opts.used_sessions ?? 0 }
       : undefined,
   });
 }

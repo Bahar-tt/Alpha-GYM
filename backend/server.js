@@ -2192,8 +2192,11 @@ app.put('/members/:id', requireAuth, (req, res) => {
 
     const renewal = req.body && req.body._renewal;
     if (renewal && typeof renewal === 'object') {
-      db.prepare('UPDATE member_sports SET used_sessions = 0 WHERE member_id = ?').run(id);
-      db.prepare('UPDATE members SET used_sessions = 0 WHERE id = ?').run(id);
+      const usedSessions = Math.max(0, Number(renewal.used_sessions) || 0);
+      db.prepare(`UPDATE member_sports SET used_sessions = CASE
+        WHEN id = (SELECT MIN(id) FROM member_sports WHERE member_id = ?) THEN ?
+        ELSE 0 END WHERE member_id = ?`).run(id, usedSessions, id);
+      db.prepare('UPDATE members SET used_sessions = ? WHERE id = ?').run(usedSessions, id);
     }
 
     const actor = req.staff ? req.staff.full_name : 'سیستم';

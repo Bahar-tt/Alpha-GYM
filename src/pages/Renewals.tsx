@@ -65,6 +65,7 @@ export default function Renewals() {
   const [approveTarget, setApproveTarget] = useState<MemberRecord | null>(null);
   const [selectedMonths, setSelectedMonths] = useState(1);
   const [amount, setAmount] = useState(0);
+  const [usedSessions, setUsedSessions] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [lastReceiptUrl, setLastReceiptUrl] = useState('');
   const [actionError, setActionError] = useState('');
@@ -126,6 +127,7 @@ export default function Renewals() {
     setApproveTarget(member);
     setSelectedMonths(1);
     setAmount(Number(member.monthly_fee) || 0);
+    setUsedSessions(Number(member.used_sessions) || 0);
     setLastReceiptUrl('');
   };
 
@@ -140,6 +142,7 @@ export default function Renewals() {
       amount,
       months: selectedMonths,
       membership_type: opt.type,
+      used_sessions: usedSessions,
     });
 
     if (result.error) {
@@ -311,6 +314,11 @@ export default function Renewals() {
                       <input type="number" className="input-field" value={amount} onChange={(e) => setAmount(Number(e.target.value) || 0)} />
                     </div>
                   )}
+                  <div>
+                    <label className="text-xs block mb-1" style={{ color: 'var(--text-secondary)' }}>جلسات استفاده‌شده</label>
+                    <input type="number" min="0" className="input-field" value={usedSessions} onChange={(e) => setUsedSessions(Math.max(0, Number(e.target.value) || 0))} />
+                    <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>برای اصلاح دستی سابقه جلسات، مقدار واقعی را وارد کنید.</p>
+                  </div>
                   <div className="flex flex-row-reverse gap-2 pt-2">
                     <button type="button" className="btn-primary flex-1" disabled={submitting} onClick={handleApprove}>
                       {submitting ? '...' : 'تأیید + صدور فیش'}
