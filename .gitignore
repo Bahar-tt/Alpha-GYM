@@ -1,0 +1,55 @@
+# Local secrets / machine config
+.env
+.env.*
+!.env.example
+*.local
+ssh.env
+secrets/
+local/
+
+# Never commit agent or remote-desktop credentials
+agent.config.json
+*agent_key*
+*AGENT_KEY*
+*AnyDesk*
+*.adspy
+*.pem
+*.key
+
+# Databases and backups
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.bak
+*.bak-*
+backups/
+*.dump
+*.sql.gz
+
+# Generated snapshots may contain sanitized schema/code only; keep them local by default
+snapshots/*
+!snapshots/.gitkeep
+reports/*
+!reports/.gitkeep
+
+# Logs and runtime files
+logs/
+*.log
+*.pid
+*.sock
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# OS / editor junk
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.swp
+*.tmp
