@@ -43,6 +43,7 @@ export interface MemberRecord extends MemberFormPayload {
   is_active?: boolean;
   created_at?: string;
   attendance_count?: number;
+  last_checkin_at?: string | null;
   sports_json?: string | null;
 }
 
@@ -88,8 +89,8 @@ function apiToRecord(row: ApiMember): MemberRecord {
     start_date: row.start_date || row.expiry_date,
     weekly_sessions: row.weekly_sessions ?? 0,
     membership_type: mType,
-    total_sessions: 12,
-    used_sessions: 0,
+    total_sessions: Number(row.total_sessions) || 0,
+    used_sessions: Number(row.used_sessions) || 0,
     birthday: row.birthday ? String(row.birthday) : '',
     notes: '',
     personnel_code: row.personnel_code ? String(row.personnel_code) : '',
@@ -111,6 +112,7 @@ function apiToRecord(row: ApiMember): MemberRecord {
     height_cm: row.height_cm != null ? Number(row.height_cm) : 0,
     weight_kg: row.weight_kg != null ? Number(row.weight_kg) : 0,
     attendance_count: row.attendance_count ?? 0,
+    last_checkin_at: row.last_checkin_at ?? null,
     is_active: active,
   };
 }

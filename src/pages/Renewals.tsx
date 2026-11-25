@@ -43,6 +43,19 @@ function addMonthsToIso(iso: string, months: number): string {
   return base.toISOString().split('T')[0];
 }
 
+function tehranDate(value?: string | null): string {
+  if (!value) return '';
+  const raw = String(value);
+  const date = /^\d{4}-\d{2}-\d{2} \d/.test(raw) ? new Date(`${raw.replace(' ', 'T')}Z`) : new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw.slice(0, 10);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' }).format(date);
+}
+
+function sessionsExhausted(member: MemberRecord): boolean {
+  const total = Number(member.total_sessions) || 0;
+  return total > 0 && Number(member.used_sessions) >= total;
+}
+
 export default function Renewals() {
   const { user, isAdmin } = useAuth();
   const [allMembers, setAllMembers] = useState<MemberRecord[]>([]);
@@ -73,7 +86,11 @@ export default function Renewals() {
     return (allMembers || [])
       .filter((m) => {
         if (archived.has(m.id)) return false;
-        return getMembershipStatus(m.end_date).kind === 'expired';
+        const expired = getMembershipStatus(m.end_date).kind === 'expired';
+        const exhaustedBeforeToday = sessionsExhausted(m)
+          && Boolean(m.last_checkin_at)
+          && tehranDate(m.last_checkin_at) < tehranDate(new Date().toISOString());
+        return expired || exhaustedBeforeToday;
       })
       .sort((a, b) => a.end_date.localeCompare(b.end_date));
   }, [allMembers, archivedIds]);

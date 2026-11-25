@@ -37,11 +37,14 @@ export interface ApiMember {
   phone: string;
   expiry_date: string;
   weekly_sessions: number;
+  total_sessions?: number;
+  used_sessions?: number;
   birthday?: string | null;
   personnel_code?: string | null;
   coach_name?: string | null;
   coach_id?: number | null;
   attendance_count?: number;
+  last_checkin_at?: string | null;
   membership_type?: string | null;
   start_date?: string | null;
   monthly_fee?: number | null;

@@ -1825,11 +1825,18 @@ app.get('/members', requireAuth, (_req, res) => {
   try {
     const rows = db.prepare('SELECT * FROM members ORDER BY id DESC').all();
     const allSports = db.prepare('SELECT * FROM member_sports ORDER BY member_id, id').all();
+    const lastCheckins = db.prepare(`
+      SELECT member_id, MAX(attended_at) AS last_checkin_at
+      FROM attendances
+      WHERE COALESCE(direction, 'check_in') != 'check_out'
+      GROUP BY member_id
+    `).all();
+    const lastCheckinByMember = Object.fromEntries(lastCheckins.map((r) => [r.member_id, r.last_checkin_at]));
     const grouped = {};
     for (const s of allSports) {
       (grouped[s.member_id] ||= []).push(s);
     }
-    res.json(rows.map((m) => attachSports(m, grouped[m.id] || [])));
+    res.json(rows.map((m) => attachSports({ ...m, last_checkin_at: lastCheckinByMember[m.id] || null }, grouped[m.id] || [])));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to list members' });
@@ -2183,6 +2190,12 @@ app.put('/members/:id', requireAuth, (req, res) => {
         .run(String(expiry_date).trim(), id);
     }
 
+    const renewal = req.body && req.body._renewal;
+    if (renewal && typeof renewal === 'object') {
+      db.prepare('UPDATE member_sports SET used_sessions = 0 WHERE member_id = ?').run(id);
+      db.prepare('UPDATE members SET used_sessions = 0 WHERE id = ?').run(id);
+    }
+
     const actor = req.staff ? req.staff.full_name : 'سیستم';
     db.prepare(`UPDATE members SET updated_by = ?, updated_at = datetime('now') WHERE id = ?`)
       .run(actor, id);
@@ -2190,7 +2203,6 @@ app.put('/members/:id', requireAuth, (req, res) => {
 
     // 🔁 تمدید: ثبت سابقه + پرداخت + فیش (قبلاً فقط تاریخ عوض می‌شد)
     let receipt = null;
-    const renewal = req.body && req.body._renewal;
     if (renewal && typeof renewal === 'object') {
       try {
         const oldEnd = existing.expiry_date || null;
