@@ -124,7 +124,10 @@ def main() -> int:
                 + PM2_BIN
                 + " list | grep alphagym-api || true"
             )
-            prc, pout, perr = run_remote(client, pm2_cmd, timeout=30)
+            prc, pout, perr = run_remote(
+                client, pm2_cmd, sudo=True,
+                sudo_password=cfg.sudo_password, timeout=30,
+            )
             data["pm2"] = {"rc": prc, "output": pout.strip(), "stderr": perr.strip()}
     finally:
         client.close()
