@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -18,11 +19,11 @@ from common import (
 from make_backup import create_backup
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "local" / "agfix109-index-AGFIX109.js"
+SOURCE = ROOT / "local" / "live-current-index-AGFIX107.js"
 OUTPUT = ROOT / "local" / "index-AGFIX110.js"
 INDEX = ROOT / "local" / "agfix110-index.html"
 ASSET = "index-AGFIX110.js"
-OLD_ASSET = "index-AGFIX109.js"
+OLD_ASSET = "index-AGFIX107.js"
 
 
 def esc(text: str) -> str:
@@ -239,8 +240,25 @@ def main() -> int:
                                sudo_password=cfg.sudo_password)
         print("BACKUP", json.dumps(backup, ensure_ascii=False))
 
-        upload(client, OUTPUT, FRONTEND_DIR + "/assets/" + ASSET)
-        upload(client, INDEX, FRONTEND_DIR + "/index.html")
+        tmp_asset = f"/tmp/{ASSET}"
+        tmp_index = "/tmp/agfix110-index.html"
+        upload(client, OUTPUT, tmp_asset)
+        upload(client, INDEX, tmp_index)
+
+        copy_cmd = (
+            f"grep -q '{OLD_ASSET}' {FRONTEND_DIR}/index.html "
+            f"&& cp {tmp_asset} {FRONTEND_DIR}/assets/{ASSET} "
+            f"&& cp {tmp_index} {FRONTEND_DIR}/index.html"
+        )
+        rc, out, err = run_remote(
+            client,
+            "sh -c " + shlex.quote(copy_cmd),
+            sudo=True,
+            sudo_password=cfg.sudo_password,
+            timeout=60,
+        )
+        if rc != 0:
+            raise SystemExit(f"Frontend copy failed: rc={rc}, out={out!r}, err={err!r}")
 
         rc, out, err = run_remote(
             client,
