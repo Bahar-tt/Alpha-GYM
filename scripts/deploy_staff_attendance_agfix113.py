@@ -606,7 +606,7 @@ def main() -> int:
         )
         rc, out, err = run_remote(client, verify_cmd, timeout=30)
         lines = [line.strip() for line in out.strip().splitlines() if line.strip()]
-        if rc != 0 or lines[:5] != ["1", "1", "2", "1", "1"] or lines[-1:] != [ASSET]:
+        if rc != 0 or lines[:5] != ["1", "1", "1", "1", "1"] or lines[-1:] != [ASSET]:
             raise SystemExit(f"Deploy verification failed: rc={rc}, lines={lines!r}, err={err!r}")
         print("BACKEND_ROUTES_OK", lines[:5])
         print("FRONTEND_REF_OK", lines[-1])
