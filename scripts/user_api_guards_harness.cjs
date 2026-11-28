@@ -7,6 +7,7 @@ const calls = {
   apiError: (a) => guards.apiError(a.status, a.errorCode, a.message, a.extra || {}),
   classifyCreateError: (a) => guards.classifyCreateError(a.err, a.fallbackMessage || undefined),
   buildFingerprintSummary: (a) => guards.buildFingerprintSummary(a),
+  fingerprintMessage: (a) => guards.fingerprintMessage(a.summary, a.subjectType),
   decideEnrollFailure: (a) => guards.decideEnrollFailure(a.row, a.nowText),
 };
 

@@ -21,13 +21,44 @@ function classifyCreateError(err, fallbackMessage = 'ثبت ناموفق بود'
   return apiError(500, 'INTERNAL_ERROR', fallbackMessage);
 }
 
+/** Professional, user-facing message for each fingerprint state. */
+function fingerprintMessage(summary, subject_type) {
+  if (!summary) {
+    return {
+      message: 'اطلاعات اثر انگشت در دسترس نیست، لطفاً دوباره تلاش کنید.',
+      message_code: 'FINGERPRINT_UNAVAILABLE',
+      tone: 'warning',
+    };
+  }
+  if (summary.status === 'enrolled') {
+    return {
+      message: 'اثر انگشت ثبت شده و برای ورود آماده است.',
+      message_code: 'FINGERPRINT_READY',
+      tone: 'success',
+    };
+  }
+  if (summary.status === 'pending') {
+    return {
+      message: 'در انتظار ثبت اثر انگشت روی دستگاه؛ لطفاً انگشت را روی سنسور قرار دهید.',
+      message_code: 'FINGERPRINT_PENDING',
+      tone: 'info',
+    };
+  }
+  const who = subject_type === 'personnel' || summary.subject_type === 'personnel' ? 'پرسنل' : 'عضو';
+  return {
+    message: `اثر انگشتی برای این ${who} ثبت نشده است. لطفاً از گزینهٔ «ثبت اثر انگشت» آغاز کنید تا کد ${summary.foh_member_id || ''} روی دستگاه ذخیره شود.`,
+    message_code: 'FINGERPRINT_NOT_ENROLLED',
+    tone: 'warning',
+  };
+}
+
 /** Pure builder: no DB access, so pytest can exercise every status branch. */
 function buildFingerprintSummary({ subject_type, member, personnel, credential, pending } = {}) {
   if (subject_type === 'personnel') {
     if (!personnel) return null;
     const id = Number(personnel.id);
     const hasFp = Boolean(personnel.fingerprint_id);
-    return {
+    const out = {
       subject_type: 'personnel',
       subject_id: id,
       status: hasFp ? 'enrolled' : pending ? 'pending' : 'not_enrolled',
@@ -38,6 +69,7 @@ function buildFingerprintSummary({ subject_type, member, personnel, credential, 
       enrollment_id: pending ? Number(pending.id) : null,
       enrollment_expires_at: pending ? pending.expires_at || null : null,
     };
+    return { ...out, ...fingerprintMessage(out, 'personnel') };
   }
 
   if (!member) return null;
@@ -48,7 +80,7 @@ function buildFingerprintSummary({ subject_type, member, personnel, credential, 
     : member.legacy_person_id
       ? String(member.legacy_person_id)
       : pending ? String(pending.foh_member_id || '') : String(900000 + id);
-  return {
+  const out = {
     subject_type: 'member',
     subject_id: id,
     status: hasFp ? 'enrolled' : pending ? 'pending' : 'not_enrolled',
@@ -57,6 +89,7 @@ function buildFingerprintSummary({ subject_type, member, personnel, credential, 
     enrollment_id: pending ? Number(pending.id) : null,
     enrollment_expires_at: pending ? pending.expires_at || null : null,
   };
+  return { ...out, ...fingerprintMessage(out, 'member') };
 }
 
 /** DB adapter used by the Express routes; delegates to the pure builder. */
@@ -124,6 +157,7 @@ module.exports = {
   apiError,
   classifyCreateError,
   buildFingerprintSummary,
+  fingerprintMessage,
   fingerprintSummary,
   decideEnrollFailure,
 };

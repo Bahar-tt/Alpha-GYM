@@ -103,6 +103,42 @@ def test_personnel_enrolled_and_pending():
     assert pending["foh_member_id"] == "800008"
 
 
+def test_personnel_not_enrolled_has_professional_persian_message():
+    out = call_guard("buildFingerprintSummary", {
+        "subject_type": "personnel",
+        "personnel": {"id": 9, "fingerprint_id": None},
+        "pending": None,
+    })
+    assert out["status"] == "not_enrolled"
+    assert out["message_code"] == "FINGERPRINT_NOT_ENROLLED"
+    assert out["tone"] == "warning"
+    assert "پرسنل" in out["message"]
+    assert "800009" in out["message"]
+    assert "ثبت نشده" in out["message"]
+
+
+def test_enrolled_and_pending_messages():
+    ready = call_guard("fingerprintMessage", {
+        "summary": {"status": "enrolled"},
+        "subjectType": "personnel",
+    })
+    assert ready["message_code"] == "FINGERPRINT_READY"
+    assert ready["tone"] == "success"
+
+    pending = call_guard("fingerprintMessage", {
+        "summary": {"status": "pending"},
+        "subjectType": "personnel",
+    })
+    assert pending["message_code"] == "FINGERPRINT_PENDING"
+    assert "سنسور" in pending["message"]
+
+
+def test_missing_summary_message_is_safe():
+    out = call_guard("fingerprintMessage", {"summary": None, "subjectType": "personnel"})
+    assert out["message_code"] == "FINGERPRINT_UNAVAILABLE"
+    assert "دوباره تلاش" in out["message"]
+
+
 def test_missing_subject_returns_null():
     assert call_guard("buildFingerprintSummary", {"subject_type": "member", "member": None}) is None
     assert call_guard("buildFingerprintSummary", {"subject_type": "personnel", "personnel": None}) is None
