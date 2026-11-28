@@ -41,7 +41,7 @@ def main() -> int:
         if not path.is_file():
             continue
         rel = path.relative_to(ROOT).as_posix()
-        if BLOCKED_NAME.search("/" + rel) and rel != ".env.example":
+        if BLOCKED_NAME.search("/" + rel) and not rel.endswith("/.env.example") and rel != ".env.example":
             issues.append(f"blocked filename: {rel}")
 
     for path in ROOT.rglob("*.py"):
