@@ -153,6 +153,67 @@ function decideEnrollFailure(row, nowText) {
   return { status: 200, action: 'fail', body: { ok: true, enrollment_id: Number(row.id) } };
 }
 
+/**
+ * Same-day check-in rule:
+ * - one check-in per sport per day;
+ * - a second check-in is allowed only for a member with at least two sports,
+ *   for a different sport, at a different time;
+ * - a third check-in or a duplicate sport is always rejected.
+ */
+function decideCheckInDuplicate({ existing = [], newSport = '', sportCount = 0, newTime = null } = {}) {
+  const sport = String(newSport || '').trim();
+  const today = (existing || []).filter(Boolean);
+  if (!today.length) return { status: 200, action: 'allow', body: { ok: true } };
+
+  const sameSport = today.some((r) => String(r.sport || '').trim() === sport);
+  if (sameSport) {
+    return {
+      status: 409,
+      action: 'deny',
+      body: {
+        ok: false,
+        duplicate: true,
+        error_code: 'DUPLICATE_CHECKIN_SAME_SPORT',
+        error: `ورود ${sport || 'این رشته'} امروز قبلاً ثبت شده است`,
+      },
+    };
+  }
+  if (Number(sportCount) < 2 || today.length >= 2) {
+    return {
+      status: 409,
+      action: 'deny',
+      body: {
+        ok: false,
+        duplicate: true,
+        error_code: today.length >= 2 ? 'THIRD_CHECKIN' : 'DUPLICATE_CHECKIN_SINGLE_SPORT',
+        error: today.length >= 2
+          ? 'امروز حداکثر دو ورود مجاز است و آن هم فقط برای دو رشتهٔ مختلف'
+          : 'تنها اعضای دو رشتهای میتوانند امروز ورود دوم هم ثبت کنند',
+      },
+    };
+  }
+  const last = today[today.length - 1];
+  const hourOf = (value) => {
+    const ms = value ? Date.parse(String(value)) : NaN;
+    return Number.isFinite(ms) ? new Date(ms).getHours() : null;
+  };
+  const lastHour = hourOf(last && last.at);
+  const newHour = hourOf(newTime);
+  if (lastHour !== null && newHour !== null && lastHour === newHour) {
+    return {
+      status: 409,
+      action: 'deny',
+      body: {
+        ok: false,
+        duplicate: true,
+        error_code: 'CHECKIN_SAME_HOUR',
+        error: 'دو ورود یک عضو باید در ساعات مختلف ثبت شود',
+      },
+    };
+  }
+  return { status: 200, action: 'allow', body: { ok: true } };
+}
+
 module.exports = {
   apiError,
   classifyCreateError,
@@ -160,4 +221,5 @@ module.exports = {
   fingerprintMessage,
   fingerprintSummary,
   decideEnrollFailure,
+  decideCheckInDuplicate,
 };

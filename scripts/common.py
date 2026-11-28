@@ -94,6 +94,8 @@ def connect(cfg: RemoteConfig):
         username=cfg.user,
         password=cfg.password,
         timeout=20,
+        banner_timeout=60,
+        auth_timeout=30,
     )
     return client
 

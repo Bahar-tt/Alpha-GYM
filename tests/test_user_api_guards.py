@@ -178,3 +178,65 @@ def test_enroll_failure_fresh_pending_cleanly_fails():
     assert out["status"] == 200
     assert out["action"] == "fail"
     assert out["body"] == {"ok": True, "enrollment_id": 7}
+
+
+def test_checkin_first_of_day_is_allowed():
+    out = call_guard("decideCheckInDuplicate", {
+        "existing": [], "newSport": "بدنسازی", "sportCount": 1,
+        "newTime": "2026-11-28T08:00:00Z",
+    })
+    assert out["status"] == 200
+    assert out["action"] == "allow"
+
+
+def test_checkin_same_sport_same_day_is_denied():
+    out = call_guard("decideCheckInDuplicate", {
+        "existing": [{"sport": "بدنسازی", "at": "2026-11-28T08:00:00Z"}],
+        "newSport": "بدنسازی", "sportCount": 2,
+        "newTime": "2026-11-28T12:00:00Z",
+    })
+    assert out["status"] == 409
+    assert out["body"]["error_code"] == "DUPLICATE_CHECKIN_SAME_SPORT"
+
+
+def test_second_checkin_requires_two_sports():
+    out = call_guard("decideCheckInDuplicate", {
+        "existing": [{"sport": "بدنسازی", "at": "2026-11-28T08:00:00Z"}],
+        "newSport": "یوگا", "sportCount": 1,
+        "newTime": "2026-11-28T12:00:00Z",
+    })
+    assert out["status"] == 409
+    assert out["body"]["error_code"] == "DUPLICATE_CHECKIN_SINGLE_SPORT"
+
+
+def test_two_sports_different_hours_are_allowed():
+    out = call_guard("decideCheckInDuplicate", {
+        "existing": [{"sport": "بدنسازی", "at": "2026-11-28T08:00:00Z"}],
+        "newSport": "یوگا", "sportCount": 2,
+        "newTime": "2026-11-28T12:00:00Z",
+    })
+    assert out["status"] == 200
+    assert out["action"] == "allow"
+
+
+def test_two_sports_same_hour_are_denied():
+    out = call_guard("decideCheckInDuplicate", {
+        "existing": [{"sport": "بدنسازی", "at": "2026-11-28 08:10:00"}],
+        "newSport": "یوگا", "sportCount": 2,
+        "newTime": "2026-11-28 08:50:00",
+    })
+    assert out["status"] == 409
+    assert out["body"]["error_code"] == "CHECKIN_SAME_HOUR"
+
+
+def test_third_checkin_is_always_denied():
+    out = call_guard("decideCheckInDuplicate", {
+        "existing": [
+            {"sport": "بدنسازی", "at": "2026-11-28T08:00:00Z"},
+            {"sport": "یوگا", "at": "2026-11-28T12:00:00Z"},
+        ],
+        "newSport": "شنا", "sportCount": 3,
+        "newTime": "2026-11-28T16:00:00Z",
+    })
+    assert out["status"] == 409
+    assert out["body"]["error_code"] == "THIRD_CHECKIN"

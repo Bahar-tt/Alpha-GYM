@@ -9,6 +9,7 @@ const calls = {
   buildFingerprintSummary: (a) => guards.buildFingerprintSummary(a),
   fingerprintMessage: (a) => guards.fingerprintMessage(a.summary, a.subjectType),
   decideEnrollFailure: (a) => guards.decideEnrollFailure(a.row, a.nowText),
+  decideCheckInDuplicate: (a) => guards.decideCheckInDuplicate(a),
 };
 
 let raw = '';
