@@ -9,7 +9,15 @@ import {
 } from '../services/memberService';
 import { receiptPublicUrl } from '../services/receiptService';
 import { ARCHIVED_KEY, RENEWALS_KEY, getMembershipStatus } from '../lib/membershipStatus';
-import { formatJalali } from '../lib/jalaliDate';
+import {
+  formatJalali,
+  gregorianToJalali,
+  jalaliToGregorianIso,
+  addJalaliMonths,
+  todayJalali,
+  type JalaliDate,
+} from '../lib/jalaliDate';
+import JalaliDatePicker from '../components/JalaliDatePicker';
 import { Search, CheckCircle, XCircle, Clock, X, AlertTriangle, Archive, ExternalLink } from 'lucide-react';
 
 interface RenewalLog {
@@ -43,6 +51,15 @@ function addMonthsToIso(iso: string, months: number): string {
   return base.toISOString().split('T')[0];
 }
 
+function endJalaliFromMember(endIso: string, months: number): JalaliDate {
+  try {
+    const iso = addMonthsToIso(endIso, months);
+    return gregorianToJalali(iso);
+  } catch {
+    return addJalaliMonths(todayJalali(), months);
+  }
+}
+
 function tehranDate(value?: string | null): string {
   if (!value) return '';
   const raw = String(value);
@@ -64,6 +81,7 @@ export default function Renewals() {
   const [search, setSearch] = useState('');
   const [approveTarget, setApproveTarget] = useState<MemberRecord | null>(null);
   const [selectedMonths, setSelectedMonths] = useState(1);
+  const [endJalali, setEndJalali] = useState<JalaliDate | null>(null);
   const [amount, setAmount] = useState(0);
   const [usedSessions, setUsedSessions] = useState(0);
   const [submitting, setSubmitting] = useState(false);
@@ -126,17 +144,23 @@ export default function Renewals() {
   const openApprove = (member: MemberRecord) => {
     setApproveTarget(member);
     setSelectedMonths(1);
+    setEndJalali(endJalaliFromMember(member.end_date, 1));
     setAmount(Number(member.monthly_fee) || 0);
     setUsedSessions(Number(member.used_sessions) || 0);
     setLastReceiptUrl('');
   };
 
+  const pickMonths = (months: number) => {
+    setSelectedMonths(months);
+    if (approveTarget) setEndJalali(endJalaliFromMember(approveTarget.end_date, months));
+  };
+
   const handleApprove = async () => {
-    if (!approveTarget) return;
+    if (!approveTarget || !endJalali) return;
     setActionError('');
     setSubmitting(true);
     const opt = MONTH_OPTIONS.find((o) => o.months === selectedMonths) || MONTH_OPTIONS[0];
-    const newEnd = addMonthsToIso(approveTarget.end_date, selectedMonths);
+    const newEnd = jalaliToGregorianIso(endJalali);
 
     const result = await updateMemberExpiry(approveTarget.id, newEnd, approveTarget.weekly_sessions, {
       amount,
@@ -185,9 +209,7 @@ export default function Renewals() {
 
   return (
     <div className="space-y-6">
-      <div
-      className="page-hero"
-      >
+      <div className="page-hero">
         <h1 className="page-title">تمدید عضویت</h1>
         <p className="page-subtitle">اعضای منقضی — تأیید تمدید با صدور فیش آنلاین</p>
       </div>
@@ -276,7 +298,7 @@ export default function Renewals() {
 
       {approveTarget && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: 'rgba(15,23,42,0.45)' }} onClick={(e) => e.target === e.currentTarget && setApproveTarget(null)}>
-          <div className="w-full max-w-md rounded-2xl overflow-hidden" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+          <div className="w-full max-w-md rounded-2xl overflow-visible" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
             <div className="px-5 py-4 flex justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
               <div>
                 <h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>تأیید تمدید</h2>
@@ -297,7 +319,7 @@ export default function Renewals() {
                 <>
                   <div className="grid grid-cols-4 gap-2">
                     {MONTH_OPTIONS.map((o) => (
-                      <button key={o.months} type="button" onClick={() => setSelectedMonths(o.months)}
+                      <button key={o.months} type="button" onClick={() => pickMonths(o.months)}
                         className="py-2.5 rounded-xl text-sm font-semibold"
                         style={{
                           background: selectedMonths === o.months ? 'var(--accent)' : 'var(--bg-muted)',
@@ -305,8 +327,20 @@ export default function Renewals() {
                         }}>{o.label}</button>
                     ))}
                   </div>
+                  <JalaliDatePicker
+                    label="تاریخ پایان جدید"
+                    value={endJalali}
+                    onChange={(d) => setEndJalali(d)}
+                    required
+                    placeholder="انتخاب از تقویم"
+                  />
                   <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                    پایان جدید: <strong style={{ color: 'var(--success)' }}>{formatJalali(addMonthsToIso(approveTarget.end_date, selectedMonths))}</strong>
+                    پایان جدید:{' '}
+                    <strong style={{ color: 'var(--success)' }}>
+                      {endJalali
+                        ? `${endJalali.year}/${String(endJalali.month).padStart(2, '0')}/${String(endJalali.day).padStart(2, '0')}`
+                        : '—'}
+                    </strong>
                   </p>
                   {isAdmin && (
                     <div>
@@ -320,7 +354,7 @@ export default function Renewals() {
                     <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>برای اصلاح دستی سابقه جلسات، مقدار واقعی را وارد کنید.</p>
                   </div>
                   <div className="flex flex-row-reverse gap-2 pt-2">
-                    <button type="button" className="btn-primary flex-1" disabled={submitting} onClick={handleApprove}>
+                    <button type="button" className="btn-primary flex-1" disabled={submitting || !endJalali} onClick={handleApprove}>
                       {submitting ? '...' : 'تأیید + صدور فیش'}
                     </button>
                     <button type="button" className="btn-outline" onClick={() => setApproveTarget(null)}>انصراف</button>

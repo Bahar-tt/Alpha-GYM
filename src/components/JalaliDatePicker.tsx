@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Calendar, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import {
   type JalaliDate,
@@ -16,11 +17,10 @@ function formatDisplay(d: JalaliDate | null): string {
   return `${d.year}/${String(d.month).padStart(2, '0')}/${String(d.day).padStart(2, '0')}`;
 }
 
-/** شنبه = ۰ … جمعه = ۶ */
 function jalaliWeekdayIndex(date: JalaliDate): number {
   const iso = jalaliToGregorianIso(date);
   const [y, m, d] = iso.split('-').map(Number);
-  const jsDay = new Date(y, m - 1, d).getDay(); // 0=یکشنبه … 6=شنبه
+  const jsDay = new Date(y, m - 1, d).getDay();
   return (jsDay + 1) % 7;
 }
 
@@ -57,10 +57,11 @@ export default function JalaliDatePicker({
 }: JalaliDatePickerProps) {
   const today = todayJalali();
   const [open, setOpen] = useState(false);
-  const [popoverPosition, setPopoverPosition] = useState<{ top?: number; bottom?: number; right: number }>({ right: 8 });
+  const [popoverPosition, setPopoverPosition] = useState<{ top?: number; bottom?: number; left: number }>({ left: 8 });
   const [viewYear, setViewYear] = useState(value?.year ?? today.year);
   const [viewMonth, setViewMonth] = useState(value?.month ?? today.month);
   const rootRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (value) {
@@ -72,18 +73,21 @@ export default function JalaliDatePicker({
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const t = e.target as Node;
+      if (rootRef.current?.contains(t) || popoverRef.current?.contains(t)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
     };
+    const onScroll = () => setOpen(false);
     document.addEventListener('mousedown', onDoc);
     document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onScroll, true);
     return () => {
       document.removeEventListener('mousedown', onDoc);
       document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onScroll, true);
     };
   }, [open]);
 
@@ -121,21 +125,105 @@ export default function JalaliDatePicker({
   };
 
   const cells = buildMonthGrid(viewYear, viewMonth);
-
   const years = Array.from({ length: 80 }, (_, i) => today.year - 60 + i);
-  const toggleCalendar = () => {
-    if (!open) {
-      const rect = rootRef.current?.getBoundingClientRect();
-      if (rect) {
-        const shouldDropUp = window.innerHeight - rect.bottom < 470;
-        const right = Math.max(8, Math.min(window.innerWidth - rect.right, window.innerWidth - 328));
-        setPopoverPosition(shouldDropUp
-          ? { bottom: Math.max(8, window.innerHeight - rect.top + 8), right }
-          : { top: Math.min(window.innerHeight - 438, rect.bottom + 8), right });
-      }
+
+  const placePopover = () => {
+    const rect = rootRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const popW = 320;
+    const popH = 420;
+    const gap = 8;
+    const shouldDropUp = window.innerHeight - rect.bottom < popH + gap;
+    let left = rect.right - popW;
+    left = Math.max(8, Math.min(left, window.innerWidth - popW - 8));
+    if (shouldDropUp) {
+      setPopoverPosition({ bottom: Math.max(8, window.innerHeight - rect.top + gap), left });
+    } else {
+      setPopoverPosition({ top: Math.min(window.innerHeight - popH - 8, rect.bottom + gap), left });
     }
+  };
+
+  const toggleCalendar = () => {
+    if (!open) placePopover();
     setOpen((o) => !o);
   };
+
+  const popover = open
+    ? createPortal(
+        <div
+          ref={popoverRef}
+          className="fixed z-[10000] w-[320px] max-w-[calc(100vw-2rem)] rounded-2xl p-3 shadow-lg"
+          style={{
+            position: 'fixed',
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-lg, var(--shadow))',
+            left: popoverPosition.left,
+            top: popoverPosition.top,
+            bottom: popoverPosition.bottom,
+            maxHeight: 'calc(100vh - 16px)',
+            overflowY: 'auto',
+          }}
+        >
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <button type="button" onClick={nextMonth} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--text-secondary)', background: 'var(--bg-muted)' }} aria-label="ماه بعد">
+              <ChevronRight size={16} />
+            </button>
+            <div className="flex items-center gap-1.5 flex-1 justify-center">
+              <select className="text-sm font-semibold rounded-lg px-2 py-1 border-0 outline-none cursor-pointer" style={{ background: 'var(--bg-muted)', color: 'var(--text)' }} value={viewMonth} onChange={(e) => setViewMonth(Number(e.target.value))}>
+                {jalaliMonthNames.map((name, i) => (
+                  <option key={name} value={i + 1}>{name}</option>
+                ))}
+              </select>
+              <select className="text-sm font-semibold rounded-lg px-2 py-1 border-0 outline-none cursor-pointer" style={{ background: 'var(--bg-muted)', color: 'var(--text)' }} value={viewYear} onChange={(e) => setViewYear(Number(e.target.value))}>
+                {years.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+            <button type="button" onClick={prevMonth} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--text-secondary)', background: 'var(--bg-muted)' }} aria-label="ماه قبل">
+              <ChevronLeft size={16} />
+            </button>
+          </div>
+          <div className="grid grid-cols-7 gap-0.5 mb-1">
+            {WEEKDAYS.map((w) => (
+              <div key={w} className="h-8 flex items-center justify-center text-[11px] font-semibold" style={{ color: 'var(--text-muted)' }}>{w}</div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-0.5">
+            {cells.map((day, idx) => {
+              if (day === null) return <div key={`e-${idx}`} className="h-9" />;
+              const disabled = isDisabled(day);
+              const selected = isSelected(day);
+              const todayCell = isToday(day);
+              return (
+                <button key={day} type="button" disabled={disabled} onClick={() => pick(day)} className="h-9 rounded-lg text-sm font-medium transition-all" style={{
+                  background: selected ? 'var(--accent)' : todayCell ? 'var(--accent-soft)' : 'transparent',
+                  color: selected ? '#fff' : disabled ? 'var(--text-muted)' : todayCell ? 'var(--accent)' : 'var(--text)',
+                  opacity: disabled ? 0.35 : 1,
+                  cursor: disabled ? 'not-allowed' : 'pointer',
+                  fontWeight: selected || todayCell ? 700 : 500,
+                }}>{day}</button>
+              );
+            })}
+          </div>
+          <div className="flex items-center justify-between mt-3 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+            <button type="button" className="text-xs font-medium px-2 py-1 rounded-lg" style={{ color: 'var(--accent)', background: 'var(--accent-soft)' }} onClick={() => {
+              if (min && compareJalali(today, min) < 0) return;
+              if (max && compareJalali(today, max) > 0) return;
+              onChange({ ...today });
+              setViewYear(today.year);
+              setViewMonth(today.month);
+              setOpen(false);
+            }}>امروز</button>
+            {allowClear && (
+              <button type="button" className="text-xs font-medium px-2 py-1 rounded-lg" style={{ color: 'var(--text-muted)' }} onClick={() => { onChange(null); setOpen(false); }}>پاک کردن</button>
+            )}
+          </div>
+        </div>,
+        document.body,
+      )
+    : null;
 
   return (
     <div ref={rootRef} className="relative" style={{ zIndex: open ? 200 : 1 }}>
@@ -143,193 +231,18 @@ export default function JalaliDatePicker({
         {label}
         {required && <span style={{ color: 'var(--danger)' }}> *</span>}
       </label>
-
-      <button
-        type="button"
-        onClick={toggleCalendar}
-        className="input-field flex items-center gap-2 text-right w-full cursor-pointer"
-        style={{ minHeight: 44 }}
-      >
+      <button type="button" onClick={toggleCalendar} className="input-field flex items-center gap-2 text-right w-full cursor-pointer" style={{ minHeight: 44 }}>
         <Calendar size={16} className="shrink-0" style={{ color: 'var(--accent)' }} />
-        <span
-          className="flex-1 text-sm"
-          style={{ color: value ? 'var(--text)' : 'var(--text-muted)' }}
-        >
+        <span className="flex-1 text-sm" style={{ color: value ? 'var(--text)' : 'var(--text-muted)' }}>
           {value ? formatDisplay(value) : placeholder}
         </span>
         {allowClear && value && (
-          <span
-            role="button"
-            tabIndex={0}
-            onClick={(e) => {
-              e.stopPropagation();
-              onChange(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.stopPropagation();
-                onChange(null);
-              }
-            }}
-            className="p-0.5 rounded"
-            style={{ color: 'var(--text-muted)' }}
-          >
+          <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); onChange(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); onChange(null); } }} className="p-0.5 rounded" style={{ color: 'var(--text-muted)' }}>
             <X size={14} />
           </span>
         )}
       </button>
-
-      {open && (
-        <div
-          className="fixed z-[9999] w-[320px] max-w-[calc(100vw-2rem)] rounded-2xl p-3 shadow-lg"
-          style={{
-            position: 'fixed',
-            background: 'var(--bg-elevated)',
-            border: '1px solid var(--border)',
-            boxShadow: 'var(--shadow)',
-            right: popoverPosition.right,
-            top: popoverPosition.top,
-            bottom: popoverPosition.bottom,
-            maxHeight: 'calc(100vh - 16px)',
-            overflowY: 'auto',
-          }}
-        >
-          {/* Header: month / year */}
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <button
-              type="button"
-              onClick={nextMonth}
-              className="p-1.5 rounded-lg transition-colors"
-              style={{ color: 'var(--text-secondary)', background: 'var(--bg-muted)' }}
-              aria-label="ماه بعد"
-            >
-              <ChevronRight size={16} />
-            </button>
-
-            <div className="flex items-center gap-1.5 flex-1 justify-center">
-              <select
-                className="text-sm font-semibold rounded-lg px-2 py-1 border-0 outline-none cursor-pointer"
-                style={{ background: 'var(--bg-muted)', color: 'var(--text)' }}
-                value={viewMonth}
-                onChange={(e) => setViewMonth(Number(e.target.value))}
-              >
-                {jalaliMonthNames.map((name, i) => (
-                  <option key={name} value={i + 1}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="text-sm font-semibold rounded-lg px-2 py-1 border-0 outline-none cursor-pointer"
-                style={{ background: 'var(--bg-muted)', color: 'var(--text)' }}
-                value={viewYear}
-                onChange={(e) => setViewYear(Number(e.target.value))}
-              >
-                {years.map((y) => (
-                  <option key={y} value={y}>
-                    {y}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <button
-              type="button"
-              onClick={prevMonth}
-              className="p-1.5 rounded-lg transition-colors"
-              style={{ color: 'var(--text-secondary)', background: 'var(--bg-muted)' }}
-              aria-label="ماه قبل"
-            >
-              <ChevronLeft size={16} />
-            </button>
-          </div>
-
-          {/* Weekdays */}
-          <div className="grid grid-cols-7 gap-0.5 mb-1">
-            {WEEKDAYS.map((w) => (
-              <div
-                key={w}
-                className="h-8 flex items-center justify-center text-[11px] font-semibold"
-                style={{ color: 'var(--text-muted)' }}
-              >
-                {w}
-              </div>
-            ))}
-          </div>
-
-          {/* Days */}
-          <div className="grid grid-cols-7 gap-0.5">
-            {cells.map((day, idx) => {
-              if (day === null) {
-                return <div key={`e-${idx}`} className="h-9" />;
-              }
-              const disabled = isDisabled(day);
-              const selected = isSelected(day);
-              const todayCell = isToday(day);
-
-              return (
-                <button
-                  key={day}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => pick(day)}
-                  className="h-9 rounded-lg text-sm font-medium transition-all"
-                  style={{
-                    background: selected
-                      ? 'var(--accent)'
-                      : todayCell
-                        ? 'var(--accent-soft)'
-                        : 'transparent',
-                    color: selected
-                      ? '#fff'
-                      : disabled
-                        ? 'var(--text-muted)'
-                        : todayCell
-                          ? 'var(--accent)'
-                          : 'var(--text)',
-                    opacity: disabled ? 0.35 : 1,
-                    cursor: disabled ? 'not-allowed' : 'pointer',
-                    fontWeight: selected || todayCell ? 700 : 500,
-                  }}
-                >
-                  {day}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="flex items-center justify-between mt-3 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
-            <button
-              type="button"
-              className="text-xs font-medium px-2 py-1 rounded-lg"
-              style={{ color: 'var(--accent)', background: 'var(--accent-soft)' }}
-              onClick={() => {
-                if (min && compareJalali(today, min) < 0) return;
-                if (max && compareJalali(today, max) > 0) return;
-                onChange({ ...today });
-                setViewYear(today.year);
-                setViewMonth(today.month);
-                setOpen(false);
-              }}
-            >
-              امروز
-            </button>
-            {allowClear && (
-              <button
-                type="button"
-                className="text-xs font-medium px-2 py-1 rounded-lg"
-                style={{ color: 'var(--text-muted)' }}
-                onClick={() => {
-                  onChange(null);
-                  setOpen(false);
-                }}
-              >
-                پاک کردن
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+      {popover}
     </div>
   );
 }
